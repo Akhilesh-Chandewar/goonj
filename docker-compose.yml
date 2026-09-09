@@ -1,0 +1,105 @@
+name: goonj
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-goonj}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goonj}
+      POSTGRES_DB: ${POSTGRES_DB:-goonj}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goonj -d goonj"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    command: ["api"]
+    environment:
+      GOONJ_ENV: ${GOONJ_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: 8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    command: ["worker"]
+    environment:
+      GOONJ_ENV: ${GOONJ_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  ws-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    command: ["ws-gateway"]
+    environment:
+      GOONJ_ENV: ${GOONJ_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: 8081
+    ports:
+      - "${WS_HOST_PORT:-8081}:8081"
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    command: ["seed"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:

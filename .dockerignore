@@ -1,0 +1,20 @@
+# Keep build contexts lean and deterministic.
+**/node_modules
+**/.next
+**/out
+**/dist
+**/bin
+**/*.tsbuildinfo
+
+# git & secrets
+.git
+.github
+.env
+.env.*
+!.env.example
+
+# docs & editor noise
+*.log
+.DS_Store
+.idea
+.vscode

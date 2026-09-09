@@ -1,0 +1,15 @@
+{
+  "name": "goonj",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "bun --filter web dev",
+    "build:web": "bun --filter web build",
+    "typecheck": "bun --filter '*' typecheck",
+    "lint": "bun --filter '*' lint"
+  },
+  "packageManager": "bun@1.4.2"
+}

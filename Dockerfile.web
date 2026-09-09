@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Next.js web app built with bun inside the bun workspace (root context).
+
+FROM oven/bun:1 AS build
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
+RUN bun install --frozen-lockfile
+COPY apps/web apps/web
+COPY packages packages
+RUN cd apps/web && bun run build
+
+FROM oven/bun:1
+WORKDIR /app/apps/web
+# bun hoists node_modules to the workspace root — copy the whole workspace.
+COPY --from=build /app /app
+EXPOSE 3000
+CMD ["bun", "run", "start"]

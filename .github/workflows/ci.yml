@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: apps/api/go.sum
+      - name: Vet
+        working-directory: apps/api
+        run: go vet ./...
+      - name: Test
+        working-directory: apps/api
+        run: go test ./...
+      - name: Build
+        working-directory: apps/api
+        run: go build ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun --filter '*' typecheck
+      - name: Build web
+        run: bun --filter web build

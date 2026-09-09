@@ -1,0 +1,99 @@
+openapi: 3.1.0
+info:
+  title: Goonj API
+  version: 0.1.0
+  description: >-
+    Audio-only platform API (on-demand + live). Phase 0 contract: health and
+    auth endpoints. Audio, playlists, social and live endpoints land with
+    their phases.
+servers:
+  - url: /api/v1
+    description: Local development
+tags:
+  - name: system
+  - name: auth
+paths:
+  /ping:
+    get:
+      tags: [system]
+      summary: Liveness ping
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: goonj-api }
+  /health:
+    get:
+      tags: [system]
+      summary: Aggregate health
+      responses:
+        "200":
+          description: Health summary
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: string }
+  /health/services:
+    get:
+      tags: [system]
+      summary: Per-dependency health
+      responses:
+        "200":
+          description: Map of dependency name to status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: string }
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Create a listener account (Phase 1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "501":
+          description: Not implemented until Phase 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for tokens (Phase 1)
+      responses:
+        "501":
+          description: Not implemented until Phase 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }

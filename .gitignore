@@ -1,0 +1,27 @@
+# environment / secrets
+.env
+.env.local
+.env.*.local
+
+# dependencies
+node_modules/
+
+# builds
+bin/
+dist/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# go
+apps/api/bin/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log
