@@ -20,6 +20,12 @@ type Config struct {
 	RedisURL       string
 	LogLevel       string
 	AllowedOrigins []string
+	JWTSecret      string
+
+	// Live streaming provider (LiveKit in Phase 2).
+	LiveKitHost   string
+	LiveKitAPIKey string
+	LiveKitSecret string
 
 	ShutdownGracePeriod time.Duration
 	ReadTimeout         time.Duration
@@ -36,6 +42,10 @@ func Load(service string) Config {
 		RedisURL:            getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		LogLevel:            getEnv("LOG_LEVEL", "info"),
 		AllowedOrigins:      splitCSV(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
+		JWTSecret:           getEnv("JWT_SECRET", "dev-only-secret-change-me"),
+		LiveKitHost:         getEnv("LIVEKIT_URL", "ws://localhost:7880"),
+		LiveKitAPIKey:       getEnv("LIVEKIT_API_KEY", "devkey"),
+		LiveKitSecret:       getEnv("LIVEKIT_API_SECRET", "devsecret"),
 		ShutdownGracePeriod: getDuration("SHUTDOWN_GRACE_PERIOD", 15*time.Second),
 		ReadTimeout:         getDuration("HTTP_READ_TIMEOUT", 10*time.Second),
 		WriteTimeout:        getDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),

@@ -16,6 +16,7 @@ import (
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/app"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 )
 
@@ -34,41 +35,40 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Postgres and Redis are wired in Phase 1; the API starts healthy without
-	// them so Phase 0 can boot against an empty compose stack.
 	pool, err := platform.NewPostgres(ctx, cfg, logger)
 	if err != nil {
-		logger.Warn("postgres unavailable, continuing degraded", slog.Any("error", err))
+		return err // auth/live require the DB; fail fast in Phase 2.
 	}
 	rdb, err := platform.NewRedis(ctx, cfg, logger)
 	if err != nil {
-		logger.Warn("redis unavailable, continuing degraded", slog.Any("error", err))
+		return err
 	}
 
-	var checks []platform.Checker
-	healthServices := []health.Service{
-		{Name: "api", Status: func(_ context.Context) string { return "ok" }},
-	}
-	if pool != nil {
-		checks = append(checks, platform.PostgresHealth{Pool: pool})
-		healthServices = append(healthServices, health.Service{
-			Name:   "postgres",
-			Status: func(ctx context.Context) string { return pingPostgres(pool, ctx) },
-		})
-	}
-	if rdb != nil {
-		checks = append(checks, platform.RedisHealth{Client: rdb})
-		healthServices = append(healthServices, health.Service{
-			Name:   "redis",
-			Status: func(ctx context.Context) string { return pingRedis(rdb, ctx) },
-		})
-	}
+	// Modules
+	authMod := auth.NewModule(pool, rdb, cfg.JWTSecret, logger)
+	liveMod := live.NewModule(pool, rdb, live.Config{
+		StreamingHost:   cfg.LiveKitHost,
+		StreamingAPIKey: cfg.LiveKitAPIKey,
+		StreamingSecret: cfg.LiveKitSecret,
+	}, logger)
+	healthMod := health.NewModule(
+		health.Service{Name: "api", Status: func(_ context.Context) string { return "ok" }},
+		health.Service{Name: "postgres", Status: func(ctx context.Context) string { return pingPostgres(pool, ctx) }},
+		health.Service{Name: "redis", Status: func(ctx context.Context) string { return pingRedis(rdb, ctx) }},
+	)
 
-	healthMod := health.NewModule(healthServices...)
-	authMod := auth.NewModule()
-	application := app.New(logger, healthMod, authMod, cfg.AllowedOrigins)
+	application := app.New(app.Deps{
+		Log:            logger,
+		AllowedOrigins: cfg.AllowedOrigins,
+		Auth:           authMod,
+		Live:           liveMod,
+		Health:         healthMod,
+	})
 
-	server := platform.NewHTTPServer(cfg, logger, application.Handler(), checks...)
+	server := platform.NewHTTPServer(cfg, logger, application.Handler(),
+		platform.PostgresHealth{Pool: pool},
+		platform.RedisHealth{Client: rdb},
+	)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Start() }()
