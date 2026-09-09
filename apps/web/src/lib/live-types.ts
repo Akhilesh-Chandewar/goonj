@@ -29,3 +29,23 @@ export interface ChatMessage {
   body: string;
   ts?: number;
 }
+
+export interface AudioSource {
+  quality: string;
+  url: string;
+  bitrate_kbps: number;
+}
+
+export interface AudioItem {
+  id: string;
+  creator_id: string;
+  creator_name?: string;
+  handle?: string;
+  title: string;
+  description: string;
+  category: string;
+  status: string;
+  duration_ms: number;
+  sources?: AudioSource[];
+  created_at: string;
+}

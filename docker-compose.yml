@@ -35,6 +35,14 @@ services:
     # --dev mode accepts the default devkey/devsecret pair from .env.example.
     # Production runs livekit with a proper config file + TLS + TURN.
 
+  # S3-compatible storage for uploads and processed audio (browser-reachable).
+  # NOTE: floci's distroless image has no shell/wget, so no container
+  # healthcheck — api/worker readiness covers it functionally.
+  floci:
+    image: floci/floci:latest
+    ports:
+      - "${S3_HOST_PORT:-4567}:4566"
+
   api:
     build:
       context: .
@@ -51,6 +59,13 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
+      S3_ENDPOINT: http://floci:4566
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:4567}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-goonj-audio-dev}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-test}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-test}
+      S3_USE_PATH_STYLE: "true"
     ports:
       - "8080:8080"
     depends_on:
@@ -72,9 +87,19 @@ services:
     environment:
       GOONJ_ENV: ${GOONJ_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://floci:4566
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:4567}
+      S3_BUCKET: ${S3_BUCKET:-goonj-audio-dev}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-test}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-test}
+      S3_USE_PATH_STYLE: "true"
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   ws-gateway:

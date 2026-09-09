@@ -27,6 +27,15 @@ type Config struct {
 	LiveKitAPIKey string
 	LiveKitSecret string
 
+	// Object storage (S3-compatible: floci/MinIO locally, S3/R2 in prod).
+	S3InternalEndpoint string // api/worker side (compose network)
+	S3PublicEndpoint   string // browser side (host network)
+	S3Region           string
+	S3Bucket           string
+	S3AccessKeyID      string
+	S3SecretAccessKey  string
+	S3UsePathStyle     bool
+
 	ShutdownGracePeriod time.Duration
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
@@ -46,6 +55,14 @@ func Load(service string) Config {
 		LiveKitHost:         getEnv("LIVEKIT_URL", "ws://localhost:7880"),
 		LiveKitAPIKey:       getEnv("LIVEKIT_API_KEY", "devkey"),
 		LiveKitSecret:       getEnv("LIVEKIT_API_SECRET", "devsecret"),
+
+		S3InternalEndpoint: getEnv("S3_ENDPOINT", "http://localhost:4566"),
+		S3PublicEndpoint:   getEnv("S3_PUBLIC_ENDPOINT", "http://localhost:4566"),
+		S3Region:           getEnv("S3_REGION", "us-east-1"),
+		S3Bucket:           getEnv("S3_BUCKET", "goonj-audio-dev"),
+		S3AccessKeyID:      getEnv("S3_ACCESS_KEY_ID", "test"),
+		S3SecretAccessKey:  getEnv("S3_SECRET_ACCESS_KEY", "test"),
+		S3UsePathStyle:     getEnv("S3_USE_PATH_STYLE", "true") == "true",
 		ShutdownGracePeriod: getDuration("SHUTDOWN_GRACE_PERIOD", 15*time.Second),
 		ReadTimeout:         getDuration("HTTP_READ_TIMEOUT", 10*time.Second),
 		WriteTimeout:        getDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),

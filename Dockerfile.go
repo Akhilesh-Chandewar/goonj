@@ -12,7 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/api ./cmd/api \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/seed ./cmd/seed
 
 FROM alpine:3.20
-RUN adduser -D -u 10001 goonj
+# ffmpeg/ffprobe power the audio processing pipeline in the worker.
+RUN apk add --no-cache ffmpeg ca-certificates && adduser -D -u 10001 goonj
 USER goonj
 COPY --from=build /out/ /usr/local/bin/
 # Migrations travel with the image for the seed/release job.

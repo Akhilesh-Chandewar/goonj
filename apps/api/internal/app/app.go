@@ -10,17 +10,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
 )
 
-// Deps carries the infrastructure the modules need.
+// Deps carries the modules the router mounts.
 type Deps struct {
 	Log            *slog.Logger
 	AllowedOrigins []string
 	Auth           *auth.Module
 	Live           *live.Module
+	Audio          *audio.Module // nil when object storage is unavailable
 	Health         *health.Module
 }
 
@@ -46,6 +48,9 @@ func New(d Deps) *App {
 		v1.Mount("/health", d.Health.Router())
 		v1.Mount("/auth", d.Auth.Router())
 		v1.Mount("/live", d.Live.Router(d.Auth.Middleware))
+		if d.Audio != nil {
+			v1.Mount("/audio", d.Audio.Router(d.Auth.Middleware))
+		}
 	})
 
 	return &App{router: r}
