@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/app"
+	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
@@ -62,7 +63,6 @@ func run() error {
 		logger.Warn("object storage unavailable, uploads disabled", slog.Any("error", err))
 		objstore = nil
 	}
-
 	// Asynq producer (shared with the worker consumers).
 	redisOpt, err := asynq.ParseRedisURI(cfg.RedisURL)
 	if err != nil {
@@ -73,10 +73,25 @@ func run() error {
 
 	// Modules
 	authMod := auth.NewModule(pool, rdb, cfg.JWTSecret, logger)
+
+	// Egress recorder (Phase 3): sessions record when the client is wired;
+	// when LiveKit is unreachable, streams still run unrecorded.
+	lkEgress := livekitinfra.NewEgress(cfg.LiveKitHost, cfg.LiveKitAPIKey, cfg.LiveKitSecret,
+		livekitinfra.OutputConfig{
+			Endpoint:        cfg.S3InternalEndpoint,
+			Region:          cfg.S3Region,
+			Bucket:          cfg.S3Bucket,
+			Prefix:          "live/recordings",
+			AccessKeyID:     cfg.S3AccessKeyID,
+			SecretAccessKey: cfg.S3SecretAccessKey,
+			UsePathStyle:    cfg.S3UsePathStyle,
+		})
 	liveMod := live.NewModule(pool, rdb, live.Config{
 		StreamingHost:   cfg.LiveKitHost,
 		StreamingAPIKey: cfg.LiveKitAPIKey,
 		StreamingSecret: cfg.LiveKitSecret,
+		Recorder:        egressRecorder{egress: lkEgress},
+		Finalizer:       recordingFinalizer{queue: queue},
 	}, logger)
 
 	var audioMod *audio.Module

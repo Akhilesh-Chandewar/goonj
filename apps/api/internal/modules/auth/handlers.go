@@ -124,9 +124,9 @@ type registerRequest struct {
 }
 
 type authResponse struct {
-	Tokens   *Tokens   `json:"tokens"`
-	Username string    `json:"username"`
-	UserID   string    `json:"user_id"`
+	Tokens   *Tokens `json:"tokens"`
+	Username string  `json:"username"`
+	UserID   string  `json:"user_id"`
 }
 
 func (h *Handlers) register(w http.ResponseWriter, r *http.Request) {
@@ -230,4 +230,3 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
-

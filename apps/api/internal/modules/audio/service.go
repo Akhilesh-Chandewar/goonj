@@ -38,10 +38,12 @@ func NewService(store *Store, objstore *storage.ObjectStore, enqueuer *asynq.Cli
 	return &Service{store: store, objstore: objstore, enqueuer: enqueuer, log: log}
 }
 
-var (	ErrNotCreator      = errors.New("creator profile required")
-	ErrInvalidTitle   = errors.New("title must be 1-200 characters")
+var (
+	ErrNotCreator      = errors.New("creator profile required")
+	ErrInvalidTitle    = errors.New("title must be 1-200 characters")
 	ErrUnsupportedMime = errors.New("unsupported audio format")
-	ErrInvalidState   = errors.New("audio is not in an editable state")
+	ErrInvalidState    = errors.New("audio is not in an editable state")
+	ErrNotOwner        = errors.New("not the content owner")
 )
 
 // InitUploadInput requests a presigned direct upload.
@@ -56,8 +58,8 @@ type InitUploadInput struct {
 
 // InitUploadResponse gives the browser everything to upload directly.
 type InitUploadResponse struct {
-	Audio     *Audio `json:"audio"`
-	UploadURL string `json:"upload_url"`
+	Audio      *Audio `json:"audio"`
+	UploadURL  string `json:"upload_url"`
 	StorageKey string `json:"storage_key"`
 }
 
@@ -159,9 +161,9 @@ func (s *Service) CompleteUpload(ctx context.Context, audioID, userID string) (*
 
 // Playback describes playable URLs for one audio row.
 type Playback struct {
-	Audio    *Audio       `json:"audio"`
+	Audio    *Audio           `json:"audio"`
 	Sources  []PlaybackSource `json:"sources"`
-	Waveform []int        `json:"waveform,omitempty"`
+	Waveform []int            `json:"waveform,omitempty"`
 }
 
 // PlaybackSource is one quality variant with a presigned URL.
@@ -172,14 +174,18 @@ type PlaybackSource struct {
 	MimeType    string `json:"mime_type"`
 }
 
-// PlaybackFor assembles presigned playback URLs for READY audio.
-func (s *Service) PlaybackFor(ctx context.Context, id string) (*Playback, error) {
+// PlaybackFor assembles presigned playback URLs for READY audio. Private
+// (draft) audio is owner-only.
+func (s *Service) PlaybackFor(ctx context.Context, id, userID string) (*Playback, error) {
 	a, err := s.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if a.Status != StatusReady {
 		return nil, fmt.Errorf("audio is %s, not playable yet", a.Status)
+	}
+	if err := s.authorizeRead(ctx, a, userID); err != nil {
+		return nil, err
 	}
 
 	files, err := s.store.Files(ctx, id)
@@ -239,6 +245,95 @@ func (s *Service) Delete(ctx context.Context, id, userID string) error {
 		return ErrNotCreator
 	}
 	return s.store.SetStatus(ctx, id, StatusPrivate)
+}
+
+// PublishInput gates the draft→published transition.
+type PublishInput struct {
+	UserID      string
+	Title       string
+	Description string
+	Category    string
+}
+
+// Publish turns a finished draft (private READY audio) into a public episode.
+// Used by creators on live recordings; works for regular uploads too.
+func (s *Service) Publish(ctx context.Context, id string, in PublishInput) (*Audio, error) {
+	a, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	creatorID, err := s.store.CreatorIDByUserID(ctx, in.UserID)
+	if err != nil || creatorID != a.CreatorID {
+		return nil, ErrNotOwner
+	}
+	if a.Status != StatusReady || a.Visibility != "private" {
+		return nil, ErrInvalidState
+	}
+	if in.Title != "" {
+		if len(in.Title) > 200 {
+			return nil, ErrInvalidTitle
+		}
+		if err := s.store.UpdateMeta(ctx, id, in.Title, in.Description, in.Category); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.store.Publish(ctx, id); err != nil {
+		return nil, err
+	}
+	s.log.Info("audio published", slog.String("audio", id))
+	return s.store.Get(ctx, id)
+}
+
+// AuthorizeRead is the exported guard for handlers reading raw rows.
+func (s *Service) AuthorizeRead(ctx context.Context, a *Audio, userID string) error {
+	return s.authorizeRead(ctx, a, userID)
+}
+
+// EditMeta updates title/description/category on owned audio (draft editing).
+func (s *Service) EditMeta(ctx context.Context, id, userID, title, description, category string) (*Audio, error) {
+	a, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	creatorID, err := s.store.CreatorIDByUserID(ctx, userID)
+	if err != nil || creatorID != a.CreatorID {
+		return nil, ErrNotOwner
+	}
+	if title == "" && description == "" && category == "" {
+		return a, nil
+	}
+	newTitle := a.Title
+	if title != "" {
+		if len(title) > 200 {
+			return nil, ErrInvalidTitle
+		}
+		newTitle = title
+	}
+	newDesc := a.Description
+	if description != "" {
+		newDesc = description
+	}
+	newCat := a.Category
+	if category != "" {
+		newCat = category
+	}
+	if err := s.store.UpdateMeta(ctx, id, newTitle, newDesc, newCat); err != nil {
+		return nil, err
+	}
+	return s.store.Get(ctx, id)
+}
+
+// authorizeRead allows public READY audio for everyone, private audio only
+// for its owner.
+func (s *Service) authorizeRead(ctx context.Context, a *Audio, userID string) error {
+	if a.Visibility != "private" || userID == "" {
+		return nil
+	}
+	creatorID, err := s.store.CreatorIDByUserID(ctx, userID)
+	if err != nil || creatorID != a.CreatorID {
+		return ErrNotFound // do not leak draft existence
+	}
+	return nil
 }
 
 func normalizeMime(m string) string {

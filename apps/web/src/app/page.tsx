@@ -32,7 +32,7 @@ export default function Home() {
         <header className="mb-10 flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold">{APP_NAME}</h1>
-            <p className="text-zinc-400">Listen. Follow. Go live.</p>
+            <p className="text-zinc-400">Tune in. Go live.</p>
           </div>
           <nav className="flex gap-4 text-sm">
             <Link href="/live" className="text-red-400 hover:underline">🔴 Live</Link>

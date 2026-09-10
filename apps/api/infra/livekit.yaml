@@ -1,0 +1,24 @@
+# LiveKit server config (dev). Replaces --dev mode so room-composite egress
+# works: the server must know how to reach redis (for egress RPC) and the
+# egress service must be able to reach this server.
+# NOTE: LiveKit does NOT interpolate env vars in config files — values are
+# hardcoded for dev; production ships its own config via IaC.
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # Dev (compose): advertise the container IP so the egress container on the
+  # same docker network can reach media directly. With use_external_ip: true
+  # LiveKit advertises the host's public IP, and container-to-container ICE
+  # fails behind NAT (hairpinning). Production sets this back to true and
+  # publishes the UDP range + TURN for browsers.
+  use_external_ip: false
+keys:
+  # Matches LIVEKIT_API_KEY/LIVEKIT_API_SECRET in .env.example.
+  devkey: devsecret
+redis:
+  address: redis:6379
+# Webhook is unnecessary locally; recording status is polled via ListEgress.

@@ -1,0 +1,23 @@
+# LiveKit egress service config (dev). Launches room-composite egress pods;
+# writes recordings to floci (S3-compatible) under live/recordings/.
+log_level: debug
+api_key: devkey
+api_secret: devsecret
+# ws://localhost works because the egress container shares the livekit
+# service's network namespace (docker-compose network_mode). Chrome's
+# template page (loaded over https) may only open insecure websockets to
+# localhost, so a ws://livekit:7880 URL gets blocked as mixed content.
+ws_url: ws://localhost:7880
+redis:
+  address: redis:6379
+# Health monitor port (container probes).
+health_port: 9091
+# Debug port for pprof; safe in dev.
+debug_port: 9092
+s3:
+  access_key: test
+  secret: test
+  region: us-east-1
+  endpoint: http://floci:4566
+  bucket: goonj-audio-dev
+  force_path_style: true

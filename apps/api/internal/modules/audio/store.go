@@ -24,21 +24,21 @@ const (
 
 // Audio is a piece of published or in-progress audio content.
 type Audio struct {
-	ID          string     `json:"id"`
-	CreatorID   string     `json:"creator_id"`
-	CreatorName string     `json:"creator_name,omitempty"`
-	Handle      string     `json:"handle,omitempty"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Category    string     `json:"category"`
-	Language    string     `json:"language"`
-	Status      string     `json:"status"`
-	Visibility  string     `json:"visibility"`
-	Source      string     `json:"source"`
-	SourceSessionID *string `json:"source_session_id,omitempty"`
-	PublishedAt *time.Time `json:"published_at,omitempty"`
-	DurationMs  int        `json:"duration_ms"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID              string     `json:"id"`
+	CreatorID       string     `json:"creator_id"`
+	CreatorName     string     `json:"creator_name,omitempty"`
+	Handle          string     `json:"handle,omitempty"`
+	Title           string     `json:"title"`
+	Description     string     `json:"description"`
+	Category        string     `json:"category"`
+	Language        string     `json:"language"`
+	Status          string     `json:"status"`
+	Visibility      string     `json:"visibility"`
+	Source          string     `json:"source"`
+	SourceSessionID *string    `json:"source_session_id,omitempty"`
+	PublishedAt     *time.Time `json:"published_at,omitempty"`
+	DurationMs      int        `json:"duration_ms"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // AudioFile is one quality variant of the processed audio.
@@ -87,6 +87,64 @@ func (st *Store) Create(ctx context.Context, creatorID, title, description, cate
 			0, created_at, '', ''`,
 		creatorID, title, description, category, language, source, sourceSessionID, StatusUploading)
 	return scanAudio(row)
+}
+
+// CreateLiveRecording inserts a draft (PRIVATE visibility) audio row sourced
+// from an ended live session. The creator publishes it explicitly.
+func (st *Store) CreateLiveRecording(ctx context.Context, creatorID, sessionID, title, description, category string) (*Audio, error) {
+	sid := sessionID
+	row := st.pool.QueryRow(ctx, `
+		INSERT INTO audio (creator_id, title, description, category, source, source_session_id, status, visibility)
+		VALUES ($1, $2, $3, $4, 'live_recording', $5, $6, 'private')
+		RETURNING id, creator_id, title, description, category, language,
+			status, visibility, source, source_session_id, published_at,
+			0, created_at, '', ''`,
+		creatorID, title, description, category, &sid, StatusProcessing)
+	return scanAudio(row)
+}
+
+// UpdateMeta rewrites title/description/category (draft editing).
+func (st *Store) UpdateMeta(ctx context.Context, id, title, description, category string) error {
+	tag, err := st.pool.Exec(ctx, `
+		UPDATE audio
+		SET title = $2, description = $3, category = $4, updated_at = now()
+		WHERE id = $1`, id, title, description, category)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetVisibility toggles public/private without touching status.
+func (st *Store) SetVisibility(ctx context.Context, id, visibility string) error {
+	tag, err := st.pool.Exec(ctx, `
+		UPDATE audio SET visibility = $2, updated_at = now() WHERE id = $1`, id, visibility)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Publish flips a READY audio row public and stamps published_at once.
+func (st *Store) Publish(ctx context.Context, id string) error {
+	tag, err := st.pool.Exec(ctx, `
+		UPDATE audio
+		SET status = $2, visibility = 'public',
+			published_at = COALESCE(published_at, now()), updated_at = now()
+		WHERE id = $1`, id, StatusReady)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Get fetches one audio row.

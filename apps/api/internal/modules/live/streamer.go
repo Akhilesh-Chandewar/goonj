@@ -38,10 +38,10 @@ type Streamer interface {
 
 // LiveKitStreamer implements Streamer against a LiveKit server.
 type LiveKitStreamer struct {
-	host        string // ws(s)://host:port of the LiveKit server
-	apiKey      string
-	apiSecret   string
-	tokenTTL    time.Duration
+	host      string // ws(s)://host:port of the LiveKit server
+	apiKey    string
+	apiSecret string
+	tokenTTL  time.Duration
 }
 
 func NewLiveKitStreamer(host, apiKey, apiSecret string) *LiveKitStreamer {
@@ -64,10 +64,10 @@ func (lk *LiveKitStreamer) JoinToken(_ context.Context, roomName, identity strin
 	at.SetIdentity(identity).
 		SetValidFor(ttl).
 		SetVideoGrant(&lkauth.VideoGrant{
-			Room:     roomName,
-			RoomJoin: true,
-			CanPublish: funcPtr(grant.Publisher),
-			CanSubscribe: funcPtr(true),
+			Room:           roomName,
+			RoomJoin:       true,
+			CanPublish:     funcPtr(grant.Publisher),
+			CanSubscribe:   funcPtr(true),
 			CanPublishData: funcPtr(true),
 		})
 	token, err := at.ToJWT()

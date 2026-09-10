@@ -19,20 +19,20 @@ const (
 
 // Session is a live broadcast owned by a creator.
 type Session struct {
-	ID          string     `json:"id"`
-	CreatorID   string     `json:"creator_id"`
-	CreatorName string     `json:"creator_name,omitempty"`
-	Handle      string     `json:"handle,omitempty"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Category    string     `json:"category"`
-	Status      string     `json:"status"`
-	Visibility  string     `json:"visibility"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	EndedAt     *time.Time `json:"ended_at,omitempty"`
-	PeakListeners int      `json:"peak_listeners"`
-	TotalListeners int64   `json:"total_listeners"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID             string     `json:"id"`
+	CreatorID      string     `json:"creator_id"`
+	CreatorName    string     `json:"creator_name,omitempty"`
+	Handle         string     `json:"handle,omitempty"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Category       string     `json:"category"`
+	Status         string     `json:"status"`
+	Visibility     string     `json:"visibility"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	PeakListeners  int        `json:"peak_listeners"`
+	TotalListeners int64      `json:"total_listeners"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // Stream holds per-session stream credentials metadata.

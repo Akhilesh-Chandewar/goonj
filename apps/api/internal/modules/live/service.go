@@ -12,17 +12,34 @@ import (
 )
 
 // Service implements the live session lifecycle. It depends on interfaces
-// (Streamer) and thin adapters (Store, Presence) so implementations can be
+// (Streamer, Recorder) and thin adapters (Store, Presence) so providers can be
 // swapped without touching business logic.
 type Service struct {
-	store    *Store
-	presence *Presence
-	streamer Streamer
-	log      *slog.Logger
+	store      *Store
+	recordings *RecordingStore
+	presence   *Presence
+	streamer   Streamer
+	recorder   Recorder // nil when egress is unavailable
+	enqueuer   RecordingFinalizer
+	log        *slog.Logger
 }
 
-func NewService(store *Store, presence *Presence, streamer Streamer, log *slog.Logger) *Service {
-	return &Service{store: store, presence: presence, streamer: streamer, log: log}
+// RecordingFinalizer enqueues the worker job that turns a finished recording
+// into a draft episode (asynq producer interface; eases testing).
+type RecordingFinalizer interface {
+	EnqueueRecordingFinalize(ctx context.Context, sessionID, egressID string) error
+}
+
+func NewService(store *Store, recordings *RecordingStore, presence *Presence, streamer Streamer, recorder Recorder, finalizer RecordingFinalizer, log *slog.Logger) *Service {
+	return &Service{
+		store:      store,
+		recordings: recordings,
+		presence:   presence,
+		streamer:   streamer,
+		recorder:   recorder,
+		enqueuer:   finalizer,
+		log:        log,
+	}
 }
 
 var (
@@ -42,6 +59,10 @@ type CreateInput struct {
 	Category    string
 	Visibility  string
 }
+
+// ErrRecordingUnavailable is returned when egress is not configured; sessions
+// still work, they just do not produce recordings.
+var ErrRecordingUnavailable = errors.New("recording is temporarily unavailable")
 
 // Create makes a new SCHEDULED session for the caller's creator profile.
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Session, error) {
@@ -95,7 +116,9 @@ func (s *Service) Start(ctx context.Context, sessionID, userID, username string)
 	roomName := "live-" + session.ID
 	if err := s.streamer.EnsureRoom(ctx, roomName); err != nil {
 		return nil, nil, err
-	}
+	} // Recording starts explicitly via StartRecordingNow once the creator's
+	// client is connected and publishing (participant egress needs a live
+	// track to record).
 	token, err := s.streamer.JoinToken(ctx, roomName, "creator-"+userID, StreamGrant{Publisher: true}, 6*time.Hour)
 	if err != nil {
 		return nil, nil, err
@@ -179,9 +202,9 @@ func (s *Service) Leave(ctx context.Context, sessionID, userID, username string)
 	return nil
 }
 
-// End closes a live session: marks ENDED, persists aggregates, clears the
-// creator's live flag, and disconnects the room. Recording → episode
-// conversion arrives in Phase 3.
+// End closes a live session: marks ENDED, stops the egress recording and
+// enqueues the worker job that converts it into a draft episode, persists
+// aggregates, clears the creator's live flag, and disconnects the room.
 func (s *Service) End(ctx context.Context, sessionID, userID string) (*Session, error) {
 	session, err := s.store.Get(ctx, sessionID)
 	if err != nil {
@@ -204,12 +227,17 @@ func (s *Service) End(ctx context.Context, sessionID, userID string) (*Session, 
 	}
 	_ = s.store.SetCreatorLive(ctx, session.CreatorID, false)
 
-	roomName := "live-" + sessionID
-	_ = s.streamer.CloseRoom(ctx, roomName)
+	s.finalizeRecording(ctx, sessionID)
+
+	// NOTE: the room is NOT deleted here. Room-composite egress joins the room
+	// as a participant and needs it alive to finalize/upload the recording;
+	// deleting it now aborts the egress ("Start signal not received"). The
+	// finalize task deletes the room once the file has landed. Listeners
+	// disconnect on their own when the creator's track closes.
 	s.broadcast(ctx, sessionID, map[string]any{
-		"type":          "session_ended",
-		"peak":          peak,
-		"total":         uniq,
+		"type":             "session_ended",
+		"peak":             peak,
+		"total":            uniq,
 		"final_concurrent": conc,
 	})
 	s.store.AppendEvent(ctx, sessionID, "session.ended",
@@ -220,6 +248,98 @@ func (s *Service) End(ctx context.Context, sessionID, userID string) (*Session, 
 		return nil, err
 	}
 	return fresh, nil
+}
+
+// StartRecordingNow begins the session recording via audio-only
+// room-composite egress. Called by the creator's client shortly after the
+// room connection is live. The egress service renders the room itself, so it
+// does not depend on a specific participant or track (and survives the
+// creator's client disconnecting). Recording continues until End.
+// Idempotent: if a recording is already active for the session, it returns it.
+func (s *Service) StartRecordingNow(ctx context.Context, sessionID, userID string) (*Recording, error) {
+	session, err := s.store.Get(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.CreatorID != s.mustCreatorID(ctx, userID) {
+		return nil, ErrNotOwner
+	}
+	if session.Status != StatusLive {
+		return nil, ErrInvalidStatus
+	}
+	if s.recorder == nil {
+		return nil, ErrRecordingUnavailable
+	}
+
+	// Idempotency: reuse an active recording instead of stacking egress jobs.
+	if rec, err := s.recordings.LatestRecording(ctx, sessionID); err == nil &&
+		(rec.Status == RecordingStatusRecording || rec.Status == RecordingStatusEnding) {
+		return rec, nil
+	}
+
+	roomName := "live-" + sessionID
+	egressID, err := s.recorder.StartRecording(ctx, roomName)
+	if err != nil {
+		s.log.Warn("room recording failed to start",
+			slog.String("session", sessionID), slog.Any("error", err))
+		return nil, err
+	}
+
+	rec, err := s.recordings.CreateRecording(ctx, sessionID, egressID, roomName)
+	if err != nil {
+		s.log.Error("recording row insert failed",
+			slog.String("session", sessionID), slog.Any("error", err))
+		return nil, err
+	}
+	s.store.AppendEvent(ctx, sessionID, "recording.started",
+		[]byte(fmt.Sprintf(`{"egress_id":%q,"mode":"room_composite"}`, egressID)))
+	s.log.Info("recording started",
+		slog.String("session", sessionID), slog.String("egress", egressID))
+	return rec, nil
+}
+
+// Recording returns the latest recording for a session (studio status view).
+func (s *Service) Recording(ctx context.Context, sessionID, userID string) (*Recording, error) {
+	session, err := s.store.Get(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.CreatorID != s.mustCreatorID(ctx, userID) {
+		return nil, ErrNotOwner
+	}
+	return s.recordings.LatestRecording(ctx, sessionID)
+}
+
+// finalizeRecording stops the egress, marks the recording ENDING, and hands
+// off to the worker. Best-effort: never blocks ending the stream.
+func (s *Service) finalizeRecording(ctx context.Context, sessionID string) {
+	rec, err := s.recordings.LatestRecording(ctx, sessionID)
+	if err != nil || rec.Status != RecordingStatusRecording {
+		return // no recording this session (or already finalized)
+	}
+
+	if s.recorder != nil {
+		if err := s.recorder.StopRecording(ctx, rec.EgressID); err != nil {
+			s.log.Warn("egress stop failed; worker will poll status",
+				slog.String("session", sessionID), slog.String("egress", rec.EgressID), slog.Any("error", err))
+		}
+	} else {
+		return // nothing can stop or convert the recording
+	}
+	if err := s.recordings.MarkRecordingEnded(ctx, rec.EgressID); err != nil {
+		s.log.Error("recording ENDING update failed",
+			slog.String("session", sessionID), slog.Any("error", err))
+		return
+	}
+	s.store.AppendEvent(ctx, sessionID, "recording.stopping",
+		[]byte(fmt.Sprintf(`{"egress_id":%q}`, rec.EgressID)))
+
+	if s.enqueuer != nil {
+		if err := s.enqueuer.EnqueueRecordingFinalize(ctx, sessionID, rec.EgressID); err != nil {
+			s.log.Error("finalize enqueue failed; recording may need manual retry",
+				slog.String("session", sessionID), slog.String("egress", rec.EgressID), slog.Any("error", err))
+		}
+	}
 }
 
 // Get returns one session.

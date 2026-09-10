@@ -42,10 +42,10 @@ type RegisterInput struct {
 }
 
 var (
-	ErrEmailTaken  = errors.New("email already registered")
-	ErrUserTaken   = errors.New("username already taken")
+	ErrEmailTaken   = errors.New("email already registered")
+	ErrUserTaken    = errors.New("username already taken")
 	ErrWeakPassword = errors.New("password must be at least 8 characters")
-	ErrBadUsername = errors.New("username must be 3-30 chars: a-z, 0-9, underscore")
+	ErrBadUsername  = errors.New("username must be 3-30 chars: a-z, 0-9, underscore")
 )
 
 // Register creates a user (+ optional creator channel) and issues tokens.

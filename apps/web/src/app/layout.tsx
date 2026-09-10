@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Goonj — every voice deserves an echo",
-  description: "Audio-only platform: on-demand shows and live audio rooms.",
+  title: "Goonj — Modern Day Radio",
+  description: "Modern day radio: live audio shows and on-demand episodes. Audio only.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -29,11 +29,32 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0
     ports:
       - "7880:7880"
-    # --dev mode accepts the default devkey/devsecret pair from .env.example.
-    # Production runs livekit with a proper config file + TLS + TURN.
+    volumes:
+      - ./apps/api/infra/livekit.yaml:/etc/livekit.yaml:ro
+    command:
+      ["--config", "/etc/livekit.yaml"]
+    # Recording (Phase 3) needs the room-composite egress; --dev mode is
+    # replaced with an explicit config that uses the devkey/devsecret pair
+    # from .env.example. Production runs livekit with TLS + TURN.
+
+  # Room-composite egress: renders the room (audio-only) and uploads the MP3
+  # recording to floci when a session ends. Needs redis to receive jobs from
+  # the livekit server and storage creds to write recordings.
+  # Shares livekit's network namespace so Chrome's template page can open an
+  # insecure ws://localhost:7880 signal (https pages block other ws:// hosts).
+  livekit-egress:
+    image: livekit/egress:latest
+    network_mode: "service:livekit"
+    environment:
+      EGRESS_CONFIG_FILE: /etc/livekit-egress.yaml
+    volumes:
+      - ./apps/api/infra/livekit-egress.yaml:/etc/livekit-egress.yaml:ro
+    depends_on:
+      - livekit
+      - redis
+      - floci
 
   # S3-compatible storage for uploads and processed audio (browser-reachable).
   # NOTE: floci's distroless image has no shell/wget, so no container
@@ -89,6 +110,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
       S3_ENDPOINT: http://floci:4566
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:4567}

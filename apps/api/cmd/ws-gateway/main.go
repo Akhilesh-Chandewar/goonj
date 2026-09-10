@@ -159,10 +159,10 @@ func newHub(rdb *redis.Client, log *slog.Logger) *hub {
 
 // room aggregates all sockets for one live session.
 type room struct {
-	id      string
-	conns   map[*wsConn]struct{}
-	pubsub  *redis.PubSub
-	cancel  context.CancelFunc
+	id     string
+	conns  map[*wsConn]struct{}
+	pubsub *redis.PubSub
+	cancel context.CancelFunc
 }
 
 // wsConn is one user socket.

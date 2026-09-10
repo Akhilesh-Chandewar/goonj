@@ -1,17 +1,19 @@
 openapi: 3.1.0
 info:
   title: Goonj API
-  version: 0.1.0
+  version: 0.2.0
   description: >-
-    Audio-only platform API (on-demand + live). Phase 0 contract: health and
-    auth endpoints. Audio, playlists, social and live endpoints land with
-    their phases.
+    Audio-only platform API (on-demand + live). Phases 0-2 implemented
+    (health, auth, upload pipeline, live core). Phase 3 adds live recordings:
+    session recording status and draft-episode publishing.
 servers:
   - url: /api/v1
     description: Local development
 tags:
   - name: system
   - name: auth
+  - name: live
+  - name: audio
 paths:
   /ping:
     get:
@@ -79,6 +81,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /live/{id}/recording:
+    get:
+      tags: [live]
+      summary: Recording status for a session (owner only)
+      description: >-
+        Returns the latest egress recording for the session. After a stream
+        ends, the worker converts the recording into a PRIVATE draft episode
+        (audio row); its id appears in audio_id once conversion finishes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Recording status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveRecording"
+        "403":
+          description: Not the session owner
+        "404":
+          description: Session or recording not found
+  /audio/{id}:
+    patch:
+      tags: [audio]
+      summary: Edit metadata or publish a draft episode (creator only)
+      description: >-
+        With visibility=public, flips a READY private draft (e.g. a converted
+        live recording) into a public episode. Without it, performs a
+        metadata-only edit (title/description/category).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAudioRequest"
+      responses:
+        "200":
+          description: Updated audio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Audio"
+        "400":
+          description: Invalid state (not READY/private) or invalid title
+        "403":
+          description: Not the owner
+        "404":
+          description: Audio not found
 components:
   schemas:
     RegisterRequest:
@@ -97,3 +155,63 @@ components:
       required: [error]
       properties:
         error: { type: string }
+    LiveRecording:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        egress_id: { type: string }
+        room_name: { type: string }
+        status:
+          type: string
+          enum: [RECORDING, ENDING, COMPLETED, FAILED, CONVERTED]
+        storage_key: { type: string }
+        file_size: { type: integer, format: int64 }
+        audio_id:
+          type: string
+          format: uuid
+          description: Draft episode id once status is CONVERTED
+        error: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at:
+          type: string
+          format: date-time
+        created_at: { type: string, format: date-time }
+    PatchAudioRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description: { type: string }
+        category: { type: string }
+        visibility:
+          type: string
+          enum: [public]
+          description: Set to public to publish a draft episode
+    Audio:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        creator_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        language: { type: string }
+        status:
+          type: string
+          enum: [UPLOADING, PROCESSING, READY, FAILED, SCHEDULED, PRIVATE]
+        visibility:
+          type: string
+          enum: [public, private]
+        source:
+          type: string
+          enum: [upload, live_recording]
+        source_session_id:
+          type: string
+          format: uuid
+        published_at:
+          type: string
+          format: date-time
+        duration_ms: { type: integer }
+        created_at: { type: string, format: date-time }

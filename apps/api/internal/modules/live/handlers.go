@@ -33,9 +33,11 @@ func (h *Handlers) Router(mw *authmod.Middleware) http.Handler {
 
 	r.With(mw.RequireAuth).Post("/{id}/start", h.start)
 	r.With(mw.RequireAuth).Post("/{id}/end", h.end)
+	r.With(mw.RequireAuth).Get("/{id}/recording", h.recording)
 	r.With(mw.RequireAuth).Post("/{id}/join", h.join)
 	r.With(mw.RequireAuth).Post("/{id}/leave", h.leave)
 	r.With(mw.RequireAuth).Post("/{id}/heartbeat", h.heartbeat)
+	r.With(mw.RequireAuth).Post("/{id}/recording/start", h.startRecording)
 	r.With(mw.RequireAuth).Post("/{id}/reactions", h.react)
 	r.With(mw.RequireAuth).Post("/{id}/report", h.report)
 
@@ -90,10 +92,10 @@ func (h *Handlers) get(w http.ResponseWriter, r *http.Request) {
 	}
 	conc, uniq, peak, _ := h.svc.Stats(r.Context(), session.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session":        session,
-		"concurrent":     conc,
-		"unique":         uniq,
-		"peak":           peak,
+		"session":    session,
+		"concurrent": conc,
+		"unique":     uniq,
+		"peak":       peak,
 	})
 }
 
@@ -120,6 +122,30 @@ func (h *Handlers) end(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
+// startRecording kicks off participant egress once the creator's client is
+// connected and publishing (POST /live/{id}/recording/start).
+func (h *Handlers) startRecording(w http.ResponseWriter, r *http.Request) {
+	identity := authmod.FromContext(r.Context())
+	rec, err := h.svc.StartRecordingNow(r.Context(), chi.URLParam(r, "id"), identity.UserID)
+	if err != nil {
+		h.writeSvcErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rec)
+}
+
+// recording exposes the session's recording status (studio: "saving your
+// stream…" → "draft ready → publish").
+func (h *Handlers) recording(w http.ResponseWriter, r *http.Request) {
+	identity := authmod.FromContext(r.Context())
+	rec, err := h.svc.Recording(r.Context(), chi.URLParam(r, "id"), identity.UserID)
+	if err != nil {
+		h.writeSvcErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
 func (h *Handlers) join(w http.ResponseWriter, r *http.Request) {
 	identity := authmod.FromContext(r.Context())
 	session, token, conc, uniq, err := h.svc.Join(r.Context(), chi.URLParam(r, "id"), identity.UserID, identity.Username)
@@ -128,10 +154,10 @@ func (h *Handlers) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session":           session,
-		"stream_token":      token,
-		"concurrent":        conc,
-		"unique_listeners":  uniq,
+		"session":          session,
+		"stream_token":     token,
+		"concurrent":       conc,
+		"unique_listeners": uniq,
 	})
 }
 
@@ -207,6 +233,8 @@ func (h *Handlers) writeSvcErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrPrivateSession):
 		writeErr(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, ErrRecordingUnavailable):
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, "internal error")
 	}

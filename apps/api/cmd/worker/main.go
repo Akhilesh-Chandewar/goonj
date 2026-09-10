@@ -13,10 +13,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/shared/tasks"
@@ -73,11 +74,35 @@ func run() error {
 	}
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})
 
+	// LiveKit egress client for finalize-recording jobs. Optional: the worker
+	// still processes uploads when LiveKit is down, finalize tasks retry.
+	var egress *livekitinfra.Egress
+	if cfg.LiveKitHost != "" {
+		egress = livekitinfra.NewEgress(cfg.LiveKitHost, cfg.LiveKitAPIKey, cfg.LiveKitSecret,
+			livekitinfra.OutputConfig{
+				Endpoint:        cfg.S3InternalEndpoint,
+				Region:          cfg.S3Region,
+				Bucket:          cfg.S3Bucket,
+				Prefix:          "live/recordings",
+				AccessKeyID:     cfg.S3AccessKeyID,
+				SecretAccessKey: cfg.S3SecretAccessKey,
+				UsePathStyle:    cfg.S3UsePathStyle,
+			})
+	}
+
 	store := NewResultStore(pool)
 	handler := newAudioHandler(objstore, store, logger)
+	handler.egress = egress
+	handler.pool = pool
+	handler.bucket = cfg.S3Bucket
+	handler.recordings = &recordingStore{pool: pool}
+	handler.drafts = &draftStore{pool: pool}
+	handler.enqueuer = asynq.NewClient(redisOpt)
+	defer handler.enqueuer.Close()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeProcessAudio, handler.processAudio)
+	mux.HandleFunc(tasks.TypeFinalizeRecording, handler.finalizeRecording)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -94,11 +119,19 @@ func run() error {
 	}
 }
 
-// audioHandler processes uploaded audio through FFmpeg.
+// audioHandler processes uploaded audio through FFmpeg and finalizes live
+// recordings into draft episodes.
 type audioHandler struct {
-	store  *storage.ObjectStore
+	store   *storage.ObjectStore
 	results *ResultStore
-	log    *slog.Logger
+	log     *slog.Logger
+
+	pool       *pgxpool.Pool
+	bucket     string
+	egress     *livekitinfra.Egress
+	recordings *recordingStore
+	drafts     *draftStore
+	enqueuer   *asynq.Client
 }
 
 func newAudioHandler(store *storage.ObjectStore, results *ResultStore, log *slog.Logger) *audioHandler {
@@ -299,5 +332,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-var _ = time.Now

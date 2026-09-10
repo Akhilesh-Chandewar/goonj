@@ -48,4 +48,25 @@ export interface AudioItem {
   duration_ms: number;
   sources?: AudioSource[];
   created_at: string;
+  /** "upload" | "live_recording" — live recordings start as drafts. */
+  source?: string;
+  source_session_id?: string;
+  visibility?: "public" | "private";
+}
+
+/** Status of the egress recording for an ended live session (Phase 3). */
+export interface LiveRecording {
+  id: string;
+  session_id: string;
+  egress_id: string;
+  room_name: string;
+  status: "RECORDING" | "ENDING" | "COMPLETED" | "FAILED" | "CONVERTED";
+  storage_key?: string;
+  file_size: number;
+  /** Draft episode id once converted — publish it from the studio. */
+  audio_id?: string;
+  error?: string;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
 }

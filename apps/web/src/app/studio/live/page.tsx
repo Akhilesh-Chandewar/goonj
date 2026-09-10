@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { LiveKitRoom, useLocalMicTrack } from "@/lib/livekit-hooks";
 import { api } from "@/lib/api";
-import type { LiveSession, StreamToken } from "@/lib/live-types";
+import type {
+  AudioItem,
+  LiveRecording,
+  LiveSession,
+  StreamToken,
+} from "@/lib/live-types";
+import { PublishButton } from "@/app/studio/publish-button";
 
 interface StartResponse {
   session: LiveSession;
@@ -17,6 +23,7 @@ export default function StudioLivePage() {
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
 
   const createAndStart = async () => {
     setBusy(true);
@@ -43,6 +50,9 @@ export default function StudioLivePage() {
     setBusy(true);
     try {
       await api(`/live/${session.id}/end`, { method: "POST" });
+      // Phase 3: the recording is being finalized into a draft episode —
+      // poll its status so the creator sees progress and can publish.
+      setEndedSessionId(session.id);
     } finally {
       setSession(null);
       setToken(null);
@@ -100,8 +110,105 @@ export default function StudioLivePage() {
         {session && token && (
           <OnAir session={session} token={token} onEnd={endStream} busy={busy} />
         )}
+
+        {endedSessionId && (
+          <RecordingStatusCard
+            sessionId={endedSessionId}
+            onDismiss={() => setEndedSessionId(null)}
+          />
+        )}
       </div>
     </main>
+  );
+}
+
+function RecordingStatusCard({
+  sessionId,
+  onDismiss,
+}: {
+  sessionId: string;
+  onDismiss: () => void;
+}) {
+  const [rec, setRec] = useState<LiveRecording | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [draft, setDraft] = useState<AudioItem | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await api<LiveRecording>(`/live/${sessionId}/recording`);
+        if (cancelled) return;
+        setRec(r);
+        if (r.audio_id) {
+          // Follow the draft episode until it is READY (publishable).
+          try {
+            const a = await api<AudioItem>(`/audio/${r.audio_id}`);
+            if (!cancelled) setDraft(a);
+          } catch {
+            /* draft not visible yet; keep polling */
+          }
+        }
+        if (r.status === "CONVERTED" && r.audio_id) {
+          // Draft exists; stop once the audio row is READY.
+          if (draft?.status === "READY") return;
+        }
+      } catch {
+        if (!cancelled) setMissing(true);
+      }
+    };
+    load();
+    const t = setInterval(load, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [sessionId, rec?.status, draft?.status]);
+
+  if (missing) {
+    return (
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-400">
+        Recording info unavailable for this session.
+        <button onClick={onDismiss} className="ml-3 text-red-400 hover:underline">
+          dismiss
+        </button>
+      </div>
+    );
+  }
+
+  if (!rec) return null;
+
+  const label: Record<LiveRecording["status"], string> = {
+    RECORDING: "Recording…",
+    ENDING: "Saving your stream — processing recording…",
+    COMPLETED: "Recording saved — creating draft episode…",
+    CONVERTED: draft && draft.status !== "READY" ? "Draft episode processing…" : "Draft episode ready!",
+    FAILED: "Recording failed",
+  };
+
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-zinc-300">
+          {rec.status === "FAILED" ? "⚠️ " : "⏳ "}
+          {label[rec.status] ?? rec.status}
+        </p>
+        {rec.status === "CONVERTED" && draft?.status === "READY" ? (
+          <PublishButton
+            audioId={draft.id}
+            title={draft.title}
+            onPublished={() => setDraft({ ...draft, visibility: "public" })}
+          />
+        ) : (
+          <button onClick={onDismiss} className="text-xs text-zinc-500 hover:text-zinc-300">
+            dismiss
+          </button>
+        )}
+      </div>
+      {rec.status === "FAILED" && rec.error && (
+        <p className="mt-2 text-xs text-red-400">{rec.error}</p>
+      )}
+    </div>
   );
 }
 
@@ -129,12 +236,25 @@ function OnAir({
     return () => clearInterval(id);
   }, [session.id]);
 
-  const { enabled, toggle, track } = useLocalMicTrack(
+  const { enabled, toggle, track, ready } = useLocalMicTrack(
     token.token,
     token.ws_url,
     token.room_name
   );
   void track;
+
+  // Phase 3: once the mic is published, start participant-egress recording.
+  // Recording is what turns the stream into a saved episode later.
+  const [recState, setRecState] = useState<"idle" | "starting" | "on" | "unavailable">("idle");
+  useEffect(() => {
+    if (!ready || recState !== "idle") return;
+    setRecState("starting");
+    api<LiveRecording>(`/live/${session.id}/recording/start`, { method: "POST" })
+      .then(() => setRecState("on"))
+      .catch(() => {
+        setRecState("unavailable");
+      });
+  }, [ready, recState, session.id]);
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
@@ -159,6 +279,13 @@ function OnAir({
       </div>
 
       <h2 className="mt-4 text-2xl font-bold">{session.title}</h2>
+
+      <p className="mt-1 text-xs text-zinc-400">
+        {recState === "on" && "⏺ Recording — it will be saved as a draft episode when you end the stream."}
+        {recState === "starting" && "Starting recording…"}
+        {recState === "unavailable" && "⚠️ Recording unavailable — the stream will not be saved."}
+        {recState === "idle" && " "}
+      </p>
 
       <button
         onClick={toggle}

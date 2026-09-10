@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { AudioItem } from "@/lib/live-types";
+import { PublishButton } from "@/app/studio/publish-button";
 
 const statusColor: Record<string, string> = {
   READY: "text-green-400 border-green-500/40 bg-green-500/10",
@@ -11,6 +12,10 @@ const statusColor: Record<string, string> = {
   UPLOADING: "text-zinc-400 border-zinc-600/40 bg-zinc-500/10",
   FAILED: "text-red-400 border-red-500/40 bg-red-500/10",
 };
+
+const isLiveRecording = (a: AudioItem) => a.source === "live_recording";
+const isDraft = (a: AudioItem) =>
+  a.visibility === "private" || (a.status === "READY" && isLiveRecording(a));
 
 export default function StudioContentPage() {
   const [items, setItems] = useState<AudioItem[] | null>(null);
@@ -59,12 +64,17 @@ export default function StudioContentPage() {
             >
               <div className="min-w-0 flex-1">
                 <Link href={`/audio/${a.id}`} className="truncate font-medium hover:text-red-300">
+                  {isLiveRecording(a) && "🔴 "}
                   {a.title}
                 </Link>
                 <p className="text-xs text-zinc-500">
                   {a.category} · {new Date(a.created_at).toLocaleDateString()}
+                  {isDraft(a) && " · draft (only you can see this)"}
                 </p>
               </div>
+              {a.status === "READY" && isDraft(a) && (
+                <PublishButton audioId={a.id} title={a.title} />
+              )}
               <span
                 className={`rounded-full border px-3 py-1 text-xs font-medium ${
                   statusColor[a.status] ?? "text-zinc-400 border-zinc-700"

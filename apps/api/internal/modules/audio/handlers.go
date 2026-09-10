@@ -34,6 +34,7 @@ func (h *Handlers) Router(mw *authmod.Middleware) http.Handler {
 
 	r.Get("/{id}", h.detail)
 	r.Get("/{id}/playback", h.playback)
+	r.With(mw.RequireRole("CREATOR", "ADMIN")).Patch("/{id}", h.update)
 	r.With(mw.RequireRole("CREATOR", "ADMIN")).Delete("/{id}", h.delete)
 
 	return r
@@ -119,11 +120,65 @@ func (h *Handlers) detail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Drafts are owner-only (same rule as playback).
+	var userID string
+	if identity := authmod.FromContext(r.Context()); identity != nil {
+		userID = identity.UserID
+	}
+	if a.Visibility == "private" {
+		if err := h.svc.AuthorizeRead(r.Context(), a, userID); err != nil {
+			h.writeSvcErr(w, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+// update publishes a draft episode (PATCH /audio/{id}).
+func (h *Handlers) update(w http.ResponseWriter, r *http.Request) {
+	identity := authmod.FromContext(r.Context())
+	var req struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Category    string `json:"category"`
+		Visibility  string `json:"visibility"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.Visibility == "public" {
+		a, err := h.svc.Publish(r.Context(), chi.URLParam(r, "id"), PublishInput{
+			UserID:      identity.UserID,
+			Title:       req.Title,
+			Description: req.Description,
+			Category:    req.Category,
+		})
+		if err != nil {
+			h.writeSvcErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, a)
+		return
+	}
+
+	// Metadata-only edit.
+	a, err := h.svc.EditMeta(r.Context(), chi.URLParam(r, "id"), identity.UserID,
+		req.Title, req.Description, req.Category)
+	if err != nil {
+		h.writeSvcErr(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, a)
 }
 
 func (h *Handlers) playback(w http.ResponseWriter, r *http.Request) {
-	pb, err := h.svc.PlaybackFor(r.Context(), chi.URLParam(r, "id"))
+	var userID string
+	if identity := authmod.FromContext(r.Context()); identity != nil {
+		userID = identity.UserID
+	}
+	pb, err := h.svc.PlaybackFor(r.Context(), chi.URLParam(r, "id"), userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "audio not found")
@@ -147,7 +202,7 @@ func (h *Handlers) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) writeSvcErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrNotFound), errors.Is(err, ErrNotCreator):
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrNotCreator), errors.Is(err, ErrNotOwner):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrInvalidTitle), errors.Is(err, ErrUnsupportedMime), errors.Is(err, ErrInvalidState):
 		writeErr(w, http.StatusBadRequest, err.Error())
