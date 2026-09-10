@@ -4,7 +4,7 @@
  */
 
 export const APP_NAME = "Goonj" as const;
-export const APP_TAGLINE = "Every voice deserves an echo" as const;
+export const APP_TAGLINE = "Modern Day Radio" as const;
 
 /** Default API base URL; override with NEXT_PUBLIC_API_URL. */
 export const API_BASE_URL =

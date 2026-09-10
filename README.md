@@ -1,8 +1,9 @@
-# Goonj (गूंज) — *Every voice deserves an echo*
+# Goonj (गूंज) — *Modern Day Radio*
 
-Audio-only content platform: YouTube's discoverability + Spotify's player +
-Twitter-Spaces live. **No video.** Live-first: everything created in a live
-session (recording, chat, transcript) becomes permanent content.
+Audio-only content platform: **modern day radio** — live shows anyone can host,
+on-demand episodes anyone can tune into. **No video.** Live-first: everything
+created in a live session (recording, chat, transcript) becomes permanent
+content.
 
 See [PLAN.md](./PLAN.md) for the full architecture, database design, API
 contract strategy, and phased roadmap.

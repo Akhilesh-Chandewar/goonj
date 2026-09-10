@@ -1,8 +1,9 @@
-# Goonj (गूंज) — "Every voice deserves an echo"
+# Goonj (गूंज) — "Modern Day Radio"
 
-Audio-only platform: **YouTube's discoverability + Spotify's player + Twitter Spaces live audio.**
-No video, ever. **Live-first:** the core differentiator is Go Live, and everything created in a live
-session (recording, chat, transcript) is saved as permanent platform content.
+Audio-only platform: **modern day radio — the discoverability of YouTube, the player of Spotify, and
+live shows anyone can tune into.** No video, ever. **Live-first:** the core differentiator is Go
+Live, and everything created in a live session (recording, chat, transcript) is saved as permanent
+platform content.
 
 ---
 
