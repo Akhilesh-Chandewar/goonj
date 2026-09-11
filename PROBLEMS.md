@@ -8,6 +8,57 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 
 ---
 
+## Phase 5 — AI & semantic search
+
+### 21. pgx sends []float32 as float4[] — vector(1536) rejects it ✅
+- **Symptom:** the `audio:embed` task entered the handler, retried with
+  exponential backoff, and failed with **no application log line at all** —
+  `docker logs worker` showed only `embedding audio` every ~40s.
+- **Diagnosis:** `InsertEmbeddings` passed `[]float32` straight to pgx, which
+  encodes it as a `float4[]` array; Postgres has no implicit cast from
+  `float4[]` to `vector`, so the INSERT died on the type. The silent look was
+  a red herring — asynq logs handler errors to its own logger, not slog; the
+  asynq `INFO` lines about retries were the only trace. The **query** side of
+  semantic search had already been given a text-literal `::vector` cast; the
+  **insert** side had been missed.
+- **Fix:** shared `ai.VectorLiteral(v)` renders pgvector's `[1,2,3]` text
+  form; every vector parameter is now `$n::vector` (inserts in
+  `cmd/worker/ai.go`, queries in `internal/modules/search/semantic.go`).
+- **Lesson:** pgvector has no implicit cast from any pgx native encoding —
+  route every vector through the text literal at *both* ends of the pipe,
+  and treat "asynq task retries without a slog line" as `handler error
+  logged by asynq`, not "nothing is wrong".
+
+### 22. ANN search has no relevance floor — one episode matches everything ✅
+- **Symptom:** `"quantum cryptographic key exchange"` "found" an episode
+  about whale songs with cosine similarity 0.068 — nearest-neighbour search
+  always returns *something* when the table is small.
+- **Diagnosis:** HNSW orders by distance but has no concept of "too far";
+  with hash embeddings the noise floor for unrelated pairs is ~0.05–0.1.
+- **Fix:** `WHERE 1 - (embedding <=> $q) >= $min` with
+  `DefaultMinSimilarity = 0.15`, overridable per deployment via
+  `SEMANTIC_MIN_SIMILARITY` (model-dependent: retune when swapping models).
+- **Lesson:** vector search needs an explicit similarity threshold tuned per
+  embedding model; without one, precision degrades silently as the catalog
+  grows and users just see "random" results.
+
+### 23. Compose host-port vars defined in .env but never referenced ⚠️
+- **Symptom:** rebuilding `api` after the Phase 5 changes tried to bind host
+  port 8080 (already occupied by nothing visible) while the running stack
+  listened on 18080.
+- **Diagnosis:** `.env` shifted every port (`API_HOST_PORT=18080`, …) but
+  `docker-compose.yml` only referenced some of them (`POSTGRES_HOST_PORT`,
+  `REDIS_HOST_PORT`, `S3_HOST_PORT`, `WS_HOST_PORT`) — `API_HOST_PORT`,
+  `WEB_HOST_PORT` and `LIVEKIT_HOST_PORT` were dead vars, so `compose up`
+  after any host reset rebinds the unshifted defaults (PROBLEMS #18 again,
+  this time in the compose file itself).
+- **Fix:** compose now templates all three through `${VAR:-default}`; the
+  in-container healthcheck still probes the unshifted internal port.
+- **Lesson:** a var in `.env` does nothing until a service references it;
+  audit `.env` keys against compose interpolation after any port shift.
+
+---
+
 ## Phase 4 — On-demand & social (engagement, search, history)
 
 ### 16. chi panics when two modules Mount the same prefix ✅

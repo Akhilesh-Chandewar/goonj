@@ -14,12 +14,13 @@ import (
 
 // Handlers exposes the audio REST API.
 type Handlers struct {
-	svc *Service
-	log *slog.Logger
+	svc         *Service
+	transcripts *TranscriptStore
+	log         *slog.Logger
 }
 
-func NewHandlers(svc *Service, log *slog.Logger) *Handlers {
-	return &Handlers{svc: svc, log: log}
+func NewHandlers(svc *Service, transcripts *TranscriptStore, log *slog.Logger) *Handlers {
+	return &Handlers{svc: svc, transcripts: transcripts, log: log}
 }
 
 // Router mounts audio routes on a fresh subrouter.
@@ -40,6 +41,7 @@ func (h *Handlers) RegisterRoutes(r chi.Router, mw *authmod.Middleware) {
 
 	r.Get("/{id}", h.detail)
 	r.Get("/{id}/playback", h.playback)
+	r.Get("/{id}/transcript", h.transcript)
 	r.With(mw.RequireRole("CREATOR", "ADMIN")).Patch("/{id}", h.update)
 	r.With(mw.RequireRole("CREATOR", "ADMIN")).Delete("/{id}", h.delete)
 
@@ -138,6 +140,44 @@ func (h *Handlers) detail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, a)
+}
+
+// transcript serves the episode's transcript chunks and AI summary
+// (written asynchronously by the embedding worker; 404 until they exist).
+// Visibility follows the same rule as detail/playback.
+func (h *Handlers) transcript(w http.ResponseWriter, r *http.Request) {
+	a, err := h.svc.store.Get(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "audio not found")
+			return
+		}
+		h.log.Error("transcript lookup failed", slog.Any("error", err))
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var userID string
+	if identity := authmod.FromContext(r.Context()); identity != nil {
+		userID = identity.UserID
+	}
+	if a.Visibility == "private" {
+		if err := h.svc.AuthorizeRead(r.Context(), a, userID); err != nil {
+			h.writeSvcErr(w, err)
+			return
+		}
+	}
+
+	tr, err := h.transcripts.Get(r.Context(), a.ID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "transcript not available yet")
+			return
+		}
+		h.log.Error("transcript fetch failed", slog.Any("error", err))
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, tr)
 }
 
 // update publishes a draft episode (PATCH /audio/{id}).

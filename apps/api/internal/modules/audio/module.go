@@ -17,15 +17,20 @@ import (
 type Module struct {
 	Service  *Service
 	Handlers *Handlers
+	// Transcripts serves /audio/{id}/transcript; nil only when the module
+	// itself is disabled (no object storage in that case anyway).
+	Transcripts *TranscriptStore
 }
 
 // NewModule wires the audio module together.
 func NewModule(pool *pgxpool.Pool, objstore *storage.ObjectStore, queue *asynq.Client, log *slog.Logger) *Module {
 	store := NewStore(pool)
 	service := NewService(store, objstore, queue, log)
+	transcripts := NewTranscriptStore(pool)
 	return &Module{
-		Service:  service,
-		Handlers: NewHandlers(service, log),
+		Service:     service,
+		Handlers:    NewHandlers(service, transcripts, log),
+		Transcripts: transcripts,
 	}
 }
 

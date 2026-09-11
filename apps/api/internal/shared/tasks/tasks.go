@@ -16,6 +16,13 @@ const (
 	// episode: polls egress completion, creates the audio row, and hands the
 	// file to the regular audio pipeline.
 	TypeFinalizeRecording = "live:finalize-recording"
+	// TypeTranscribeAudio runs speech-to-text over a READY episode and
+	// stores per-chunk transcript rows. Enqueued by the worker right after
+	// processing succeeds (idempotent: chunks are replaced, not appended).
+	TypeTranscribeAudio = "audio:transcribe"
+	// TypeEmbedAudio embeds transcript chunks missing vectors and refreshes
+	// the AI summary. Enqueued by the transcribe step (and safe to re-run).
+	TypeEmbedAudio = "audio:embed"
 )
 
 // ProcessAudioPayload instructs the worker to run the FFmpeg pipeline on an
@@ -65,6 +72,52 @@ func NewFinalizeRecording(p FinalizeRecordingPayload) (*asynq.Task, error) {
 // DecodeFinalizeRecording parses a finalize-recording task payload.
 func DecodeFinalizeRecording(t *asynq.Task) (FinalizeRecordingPayload, error) {
 	var p FinalizeRecordingPayload
+	err := json.Unmarshal(t.Payload(), &p)
+	return p, err
+}
+
+// TranscribeAudioPayload instructs the worker to transcribe a READY
+// episode's medium-quality variant.
+type TranscribeAudioPayload struct {
+	AudioID string `json:"audio_id"`
+	// StorageKey of the playable variant to transcribe (medium when present).
+	StorageKey string `json:"storage_key"`
+}
+
+// NewTranscribeAudio builds a transcribe task.
+func NewTranscribeAudio(p TranscribeAudioPayload) (*asynq.Task, error) {
+	body, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeTranscribeAudio, body), nil
+}
+
+// DecodeTranscribeAudio parses a transcribe task payload.
+func DecodeTranscribeAudio(t *asynq.Task) (TranscribeAudioPayload, error) {
+	var p TranscribeAudioPayload
+	err := json.Unmarshal(t.Payload(), &p)
+	return p, err
+}
+
+// EmbedAudioPayload instructs the worker to embed all transcript chunks of
+// an episode that lack a vector, then regenerate the summary.
+type EmbedAudioPayload struct {
+	AudioID string `json:"audio_id"`
+}
+
+// NewEmbedAudio builds an embed task.
+func NewEmbedAudio(p EmbedAudioPayload) (*asynq.Task, error) {
+	body, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeEmbedAudio, body), nil
+}
+
+// DecodeEmbedAudio parses an embed task payload.
+func DecodeEmbedAudio(t *asynq.Task) (EmbedAudioPayload, error) {
+	var p EmbedAudioPayload
 	err := json.Unmarshal(t.Payload(), &p)
 	return p, err
 }

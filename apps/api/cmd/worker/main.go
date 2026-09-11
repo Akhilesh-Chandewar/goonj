@@ -97,12 +97,15 @@ func run() error {
 	handler.bucket = cfg.S3Bucket
 	handler.recordings = &recordingStore{pool: pool}
 	handler.drafts = &draftStore{pool: pool}
+	handler.ai = &aiStore{pool: pool}
 	handler.enqueuer = asynq.NewClient(redisOpt)
 	defer handler.enqueuer.Close()
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeProcessAudio, handler.processAudio)
 	mux.HandleFunc(tasks.TypeFinalizeRecording, handler.finalizeRecording)
+	mux.HandleFunc(tasks.TypeTranscribeAudio, handler.transcribeAudio)
+	mux.HandleFunc(tasks.TypeEmbedAudio, handler.embedAudio)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -131,6 +134,7 @@ type audioHandler struct {
 	egress     *livekitinfra.Egress
 	recordings *recordingStore
 	drafts     *draftStore
+	ai         *aiStore
 	enqueuer   *asynq.Client
 }
 
@@ -219,6 +223,18 @@ func (h *audioHandler) processAudio(ctx context.Context, t *asynq.Task) error {
 	waveJSON, _ := json.Marshal(peaks)
 	if err := h.results.MarkReady(ctx, payload.AudioID, durationMs, waveJSON, totalSize, "audio/mpeg"); err != nil {
 		return fmt.Errorf("mark ready: %w", err)
+	}
+
+	// 7. Chain transcription (Phase 5): embeds + summary follow from it.
+	// Enqueue outside the retry path — if this fails the task is retried
+	// anyway, and transcribe is idempotent (chunks are replaced).
+	if task, err := tasks.NewTranscribeAudio(tasks.TranscribeAudioPayload{
+		AudioID:    payload.AudioID,
+		StorageKey: fmt.Sprintf("audio/processed/%s/medium.mp3", payload.AudioID),
+	}); err != nil {
+		h.log.Warn("build transcribe task failed (non-fatal)", slog.Any("error", err))
+	} else if _, err := h.enqueuer.EnqueueContext(ctx, task); err != nil {
+		h.log.Warn("enqueue transcription failed (non-fatal)", slog.Any("error", err))
 	}
 
 	h.log.Info("audio ready",

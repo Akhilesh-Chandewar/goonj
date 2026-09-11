@@ -18,10 +18,13 @@ type Module struct {
 	Handlers *Handlers
 }
 
-// NewModule wires the search module together.
+// NewModule wires the search module together. Semantic search (pgvector over
+// transcript chunks) is attached when the extension is usable; if its tables
+// are absent the semantic pass degrades silently per query.
 func NewModule(pool *pgxpool.Pool, log *slog.Logger) *Module {
 	store := NewStore(pool)
 	service := NewService(store, log)
+	service.semantic = NewSemanticStore(pool)
 	return &Module{
 		Service:  service,
 		Handlers: NewHandlers(service, log),

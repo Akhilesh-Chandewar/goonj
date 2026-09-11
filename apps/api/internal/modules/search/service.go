@@ -6,15 +6,21 @@ import (
 	"strings"
 )
 
-// Service validates queries and combines result sets.
+// Service validates queries and combines result sets: keyword (FTS +
+// trigram) plus optional semantic hits (pgvector over transcript chunks).
 type Service struct {
-	store *Store
-	log   *slog.Logger
+	store    *Store
+	semantic *SemanticStore
+	log      *slog.Logger
 }
 
 func NewService(store *Store, log *slog.Logger) *Service {
 	return &Service{store: store, log: log}
 }
+
+// NewServiceWithSemantic attaches pgvector semantic search. The semantic
+// store's embedder must match the one the embedding worker uses (both call
+// ai.DefaultEmbedder, so they agree by construction).
 
 // Results bundles audio + creator hits for the unified /search endpoint.
 type Results struct {
@@ -42,5 +48,19 @@ func (s *Service) All(ctx context.Context, q string, limit, offset int) (*Result
 	if err != nil {
 		return nil, err
 	}
-	return &Results{Query: q, Audio: audio, Creators: creators}, nil
+
+	// Semantic pass: fetch extra candidates, drop audio already found by
+	// the keyword pass, and blend the remainder after the keyword hits.
+	exclude := make(map[string]bool, len(audio))
+	for _, a := range audio {
+		exclude[a.ID] = true
+	}
+	semantic, err := s.Semantic(ctx, q, limit, offset, exclude)
+	if err != nil {
+		s.log.Warn("semantic search failed (continuing with keyword results)",
+			slog.Any("error", err))
+		semantic = nil
+	}
+
+	return &Results{Query: q, Audio: append(audio, semantic...), Creators: creators}, nil
 }
