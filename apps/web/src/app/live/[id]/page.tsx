@@ -12,6 +12,7 @@ import "@livekit/components-styles";
 
 import { api, getAccessToken } from "@/lib/api";
 import type { LiveSession, StreamToken } from "@/lib/live-types";
+import CaptionBar from "@/components/CaptionBar";
 
 const REACTIONS = [
   { id: "heart", emoji: "❤️" },
@@ -113,6 +114,9 @@ export default function LiveRoomPage({
 
             {/* Audio visualizer card */}
             <AudioStage />
+
+            {/* Live translated captions (Phase 5.5) */}
+            <CaptionBar sessionId={id} />
 
             <ReactionBar sessionId={id} />
           </section>

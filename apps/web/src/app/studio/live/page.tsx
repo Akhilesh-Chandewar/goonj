@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LiveKitRoom, useLocalMicTrack } from "@/lib/livekit-hooks";
+import TranslationStudio from "@/components/TranslationStudio";
 import { api } from "@/lib/api";
 import type {
   AudioItem,
@@ -293,6 +294,9 @@ function OnAir({
       >
         {enabled ? "🎙 Mute microphone" : "🔇 Unmute microphone"}
       </button>
+
+      {/* Phase 5.5: live translated captions */}
+      <TranslationStudio sessionId={session.id} />
 
       <LiveKitRoom
         token={token.token}

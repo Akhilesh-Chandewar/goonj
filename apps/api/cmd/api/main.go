@@ -15,6 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/app"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/ai"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
 	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
@@ -117,6 +119,10 @@ func run() error {
 	historyMod := history.NewModule(pool, logger)
 	searchMod := search.NewModule(pool, logger)
 
+	// Phase 5.5: live translation (captions) + voice-agent session minting.
+	translationMod := translation.NewModule(pool, rdb, logger)
+	aiMod := ai.NewHandlers(pool, logger)
+
 	application := app.New(app.Deps{
 		Log:            logger,
 		AllowedOrigins: cfg.AllowedOrigins,
@@ -128,6 +134,8 @@ func run() error {
 		Social:         socialMod,
 		History:        historyMod,
 		Search:         searchMod,
+		Translation:    translationMod,
+		AI:             aiMod,
 		Health:         healthMod,
 	})
 

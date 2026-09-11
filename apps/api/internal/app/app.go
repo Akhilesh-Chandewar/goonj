@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/ai"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/engagement"
@@ -19,6 +20,7 @@ import (
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/playlists"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/search"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/social"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
 )
 
 // Deps carries the modules the router mounts.
@@ -33,6 +35,8 @@ type Deps struct {
 	Social         *social.Module
 	History        *history.Module
 	Search         *search.Module
+	Translation    *translation.Module
+	AI             *ai.Handlers
 	Health         *health.Module
 }
 
@@ -57,7 +61,22 @@ func New(d Deps) *App {
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Mount("/health", d.Health.Router())
 		v1.Mount("/auth", d.Auth.Router())
-		v1.Mount("/live", d.Live.Router(d.Auth.Middleware))
+
+		// The live module owns the /live prefix; translation (captions,
+		// per-session config) registers onto the same mux — chi forbids
+		// mounting a second handler on an existing path (PROBLEMS #16).
+		liveMux := chi.NewRouter()
+		liveMux.Mount("/", d.Live.Router(d.Auth.Middleware))
+		if d.Translation != nil {
+			d.Translation.Handlers.RegisterRoutes(liveMux, d.Auth.Middleware)
+		}
+		v1.Mount("/live", liveMux)
+
+		v1.Mount("/creators", d.Social.Router(d.Auth.Middleware))
+		v1.Mount("/subscriptions", d.Social.FeedRouter(d.Auth.Middleware))
+		v1.Mount("/playlists", d.Playlists.Router(d.Auth.Middleware))
+		v1.Mount("/history", d.History.Router(d.Auth.Middleware))
+		v1.Mount("/search", d.Search.Router(d.Auth.Middleware))
 
 		// The audio module owns the /audio prefix; engagement (likes +
 		// comments) registers onto the same mux — chi forbids mounting a
@@ -71,11 +90,10 @@ func New(d Deps) *App {
 		}
 		v1.Mount("/audio", audioMux)
 
-		v1.Mount("/creators", d.Social.Router(d.Auth.Middleware))
-		v1.Mount("/subscriptions", d.Social.FeedRouter(d.Auth.Middleware))
-		v1.Mount("/playlists", d.Playlists.Router(d.Auth.Middleware))
-		v1.Mount("/history", d.History.Router(d.Auth.Middleware))
-		v1.Mount("/search", d.Search.Router(d.Auth.Middleware))
+		// AI: voice-agent session minting (ephemeral client secrets).
+		if d.AI != nil {
+			v1.Mount("/ai", d.AI.Router(d.Auth.Middleware))
+		}
 	})
 
 	return &App{router: r}
