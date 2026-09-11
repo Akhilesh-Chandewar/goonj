@@ -59,6 +59,36 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 
 ---
 
+### 24. chi Mount panic recurred when adding translation routes to /live ✅
+- **Symptom:** API container crash-looped: `panic: attempting to Mount() a
+  handler on an existing path, '/live'` — the new liveMux was mounted while
+  the original `v1.Mount("/live", …)` line was left in place.
+- **Fix:** removed the old mount; the shared mux (live + translation
+  `RegisterRoutes`) is now the only /live registration. Same trap as #16,
+  different prefix — the lesson generalizes: **any new module sharing a
+  prefix must replace, never supplement, the old Mount.**
+
+### 25. Server-side translator needed CGO — pivoted to browser WebRTC ✅
+- **Symptom:** a `cmd/translator` worker joining the LiveKit room via
+  `server-sdk-go/v2` + `pkg/media` (Opus→PCM decode) failed to build:
+  `pkg-config: Package 'opus'/'soxr' not found` (libopus + libsoxr C deps),
+  plus a SIP-related compile error in the SDK version.
+- **Diagnosis:** server-side media decode drags in CGO, OS packages and a
+  much larger image — and would *add* a network hop (SFU→worker→OpenAI),
+  the exact thing a latency-first design avoids.
+- **Decision:** the creator's browser already owns the mic; OpenAI's
+  translation endpoint speaks WebRTC. The browser now connects **directly**
+  to OpenAI with an ephemeral client secret (browser→OpenAI, one hop), and
+  Goonj only relays caption *text* over the existing Redis→ws-gateway path.
+  The server-side WS client (`infrastructure/openai`) is kept + unit-tested
+  for a future media worker if per-language translated **audio** tracks are
+  ever needed.
+- **Lesson:** prefer the path with the fewest network hops and no C
+  toolchain; keep the heavier alternative behind an interface for when
+  scale actually demands it.
+
+---
+
 ## Phase 4 — On-demand & social (engagement, search, history)
 
 ### 16. chi panics when two modules Mount the same prefix ✅
