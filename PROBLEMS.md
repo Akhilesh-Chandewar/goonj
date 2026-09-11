@@ -8,6 +8,81 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 
 ---
 
+## Phase 4 — On-demand & social (engagement, search, history)
+
+### 16. chi panics when two modules Mount the same prefix ✅
+- **Symptom:** API container crash-looped at boot:
+  `panic: chi: attempting to Mount() a handler on an existing path, '/audio'`.
+  Engagement routes (likes/comments) were mounted at `/audio` alongside the
+  audio module; `go build`/`go vet` cannot catch a runtime route collision.
+- **Diagnosis:** `chi.Mount` is exclusive per path — the second `Mount`
+  panics inside `app.New`, killing the process before the HTTP server starts.
+- **Fix:** modules expose `RegisterRoutes(mux, mw)` next to `Router`;
+  the composition root builds one `/audio` mux and registers audio +
+  engagement onto it (`internal/app/app.go`). `Router` is now a thin wrapper
+  over `RegisterRoutes` on a fresh mux.
+- **Lesson:** route tables are runtime state. When two modules share a URL
+  prefix, make the shared prefix an explicit registration point in the
+  composition root, not a second `Mount`.
+
+### 17. pgx types each placeholder per occurrence — `uuid = text` ✅
+- **Symptom:** `GET /audio/{id}/comments` → 500 with
+  `operator does not exist: uuid = text (SQLSTATE 42883)`, only when the
+  thread endpoint was called (writes worked fine).
+- **Diagnosis:** one `$2` was used both as `$2 <> ''` (forces `text`) and
+  `c.user_id = $2` (uuid column). pgx infers a single type per parameter
+  number across the whole statement, so the comparison became uuid = text.
+- **Fix:** pass the viewer as `*string` (nil for anonymous) and cast
+  explicitly: `$2::uuid IS NOT NULL AND c.user_id = $2::uuid`. The same
+  landmine was removed from an unused `audio_id = ANY($2)` helper.
+- **Lesson:** with pgx, every occurrence of a placeholder must agree on a
+  Postgres type. Prefer explicit `::type` casts or typed nils over sentinel
+  empty strings that double as text literals.
+
+### 18. Stale docker-proxy processes squat on compose ports after a host reset ✅
+- **Symptom:** every `docker compose up` failed with `ports are not
+  available` while `docker ps -a` showed zero running containers; killing
+  the `docker-proxy` PIDs failed with `Operation not permitted` (root-owned,
+  parent pid 1).
+- **Diagnosis:** a host reset orphaned the proxies; the daemon has no
+  reaper for them and `compose down` cannot help because compose no longer
+  knows about them.
+- **Fix:** shifted host ports via `.env` (gitignored) plus a temporary
+  compose override; new wrinkle — exported shell vars
+  (`POSTGRES_HOST_PORT=5433`, …) **beat** `.env`, so they had to be
+  overridden per invocation. All consumers (DATABASE_URL, S3_PUBLIC_ENDPOINT,
+  ALLOWED_ORIGINS, NEXT_PUBLIC_API_URL) had to move in lockstep or presigned
+  URLs silently point browsers at a port nothing listens on.
+- **Lesson:** a port change is a *system-wide* config change, not a compose
+  flag. Every consumer that bakes a URL around a port must move together.
+
+### 19. A stray no-op edit can clobber a whole .env file ✅
+- **Symptom:** after re-sorting `.env` for the port shift, the upload
+  pipeline started failing with `NoSuchKey`-style 404s on `HeadObject` and
+  browsers got presigned URLs against the old S3 port.
+- **Diagnosis:** the rewrite dropped `S3_PUBLIC_ENDPOINT` and
+  `ALLOWED_ORIGINS` lines; compose fell back to defaults pointing at the old
+  ports. `docker compose up` only re-reads env for *changed* services, so
+  the API container kept the stale value until `--force-recreate`.
+- **Fix:** rewrote `.env` completely, then `--force-recreate`d the affected
+  services; verification now asserts the *container's* env, not the file's.
+- **Lesson:** treat `.env` as code: never hand-edit a subset. Assert runtime
+  config inside the container (`docker exec … env`), not the file on disk.
+
+### 20. Stale DB volume after a host reset: "table does not exist" despite green migrations ✅
+- **Symptom:** every Phase 4 endpoint 500'd with `relation "follows" does
+  not exist` while an earlier seed run had logged `migrated to version 5`.
+- **Diagnosis:** the host was reset between the two runs; that seed went
+  through a **stale proxy to a postgres instance that no longer exists**.
+  The surviving named volume (`goonj_pgdata`) was pre-Phase-4.
+- **Fix:** re-ran migrations against the live DB; added a precondition to
+  the E2E harness that asserts the container's actual schema before testing.
+- **Lesson:** after any host/docker reset, re-verify *stateful* layers
+  (volumes) against the *running* services — old logs prove nothing. Use
+  `docker exec <db> psql …` (in-network identity), not host port inference.
+
+---
+
 ## Phase 3 — Live → Saved (egress recording pipeline)
 
 ### 1. Participant egress rejected by the egress build ✅

@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Goonj API
-  version: 0.2.0
+  version: 0.4.0
   description: >-
-    Audio-only platform API (on-demand + live). Phases 0-2 implemented
-    (health, auth, upload pipeline, live core). Phase 3 adds live recordings:
-    session recording status and draft-episode publishing.
+    Audio-only platform API (on-demand + live). Phases 0-3 implemented
+    (health, auth, upload pipeline, live core, live recordings). Phase 4 adds
+    the on-demand & social surface: search, likes, comments, follows,
+    playlists, listening history, and the subscriptions feed.
 servers:
   - url: /api/v1
     description: Local development
@@ -137,8 +138,427 @@ paths:
           description: Not the owner
         "404":
           description: Audio not found
+  /search:
+    get:
+      tags: [audio]
+      summary: Unified search over audio and creators (Phase 4)
+      description: >-
+        Full-text (websearch syntax) plus trigram fuzzy matching. Empty q
+        returns empty result sets, not the whole catalog.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, maxLength: 200 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 25, maximum: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Audio and creator hits ranked by relevance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+  /audio/{id}/like:
+    get:
+      tags: [audio]
+      summary: Like state for an episode (count + viewer state)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Like summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeState"
+    post:
+      tags: [audio]
+      summary: Like an episode
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Like summary after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeState"
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [audio]
+      summary: Remove the viewer's like
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Like summary after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeState"
+      security: [{ bearerAuth: [] }]
+  /audio/{id}/comments:
+    get:
+      tags: [audio]
+      summary: Comment thread for an episode
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Top-level comments plus one level of replies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentThread"
+    post:
+      tags: [audio]
+      summary: Add a comment or reply
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 1000 }
+                parent_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Created comment
+      security: [{ bearerAuth: [] }]
+  /creators/{id}:
+    get:
+      tags: [audio]
+      summary: Public creator page (channel + episodes + viewer follow state)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Channel summary with episodes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatorPage"
+        "404":
+          description: Creator not found
+  /creators/{id}/follow:
+    post:
+      tags: [audio]
+      summary: Follow a creator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Follow state after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowState"
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [audio]
+      summary: Unfollow a creator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Follow state after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowState"
+      security: [{ bearerAuth: [] }]
+  /subscriptions/feed:
+    get:
+      tags: [audio]
+      summary: Newest episodes across followed creators
+      responses:
+        "200":
+          description: Episode list, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FeedItem"
+      security: [{ bearerAuth: [] }]
+  /history/{id}/progress:
+    post:
+      tags: [audio]
+      summary: Record listening progress (upsert, one row per user+audio)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position_ms: { type: integer }
+                duration_ms: { type: integer }
+      responses:
+        "200":
+          description: Progress recorded
+      security: [{ bearerAuth: [] }]
+  /history/{id}/resume:
+    get:
+      tags: [audio]
+      summary: Saved position for an episode (continue-listening)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Saved position
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  position_ms: { type: integer }
+                  completed: { type: boolean }
+      security: [{ bearerAuth: [] }]
+  /playlists:
+    get:
+      tags: [audio]
+      summary: List the caller's playlists
+      responses:
+        "200":
+          description: Playlist metadata list
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [audio]
+      summary: Create a playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 120 }
+                description: { type: string }
+                visibility: { type: string, enum: [public, private] }
+      responses:
+        "201":
+          description: Created playlist
+      security: [{ bearerAuth: [] }]
+  /playlists/{id}:
+    get:
+      tags: [audio]
+      summary: Playlist detail with ordered items
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Playlist with items
+        "404":
+          description: Playlist not found or private
+    patch:
+      tags: [audio]
+      summary: Update playlist metadata (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated playlist
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [audio]
+      summary: Delete a playlist (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deleted
+      security: [{ bearerAuth: [] }]
+  /playlists/{id}/items:
+    post:
+      tags: [audio]
+      summary: Append an episode (body {audio_id}; idempotent)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Added (or already present)
+      security: [{ bearerAuth: [] }]
+  /audio/studio/stats:
+    get:
+      tags: [audio]
+      summary: Creator studio dashboard stats
+      responses:
+        "200":
+          description: Episode/like/live aggregates for the signed-in creator
+      security: [{ bearerAuth: [] }]
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
+    LikeState:
+      type: object
+      properties:
+        liked: { type: boolean }
+        likes: { type: integer, format: int64 }
+    CommentThread:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            comments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Comment"
+            replies:
+              type: array
+              items:
+                $ref: "#/components/schemas/Comment"
+    Comment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        audio_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        body: { type: string }
+        is_pinned: { type: boolean }
+        like_count: { type: integer }
+        mine: { type: boolean }
+        created_at: { type: string, format: date-time }
+    SearchResults:
+      type: object
+      properties:
+        query: { type: string }
+        audio:
+          type: array
+          items:
+            $ref: "#/components/schemas/HitAudio"
+        creators:
+          type: array
+          items:
+            $ref: "#/components/schemas/HitCreator"
+    HitAudio:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string }
+        creator_id: { type: string, format: uuid }
+        creator_name: { type: string }
+        handle: { type: string }
+        duration_ms: { type: integer }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        rank: { type: number }
+    HitCreator:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        handle: { type: string }
+        channel_name: { type: string }
+        tagline: { type: string }
+        is_live: { type: boolean }
+        subscriber_count: { type: integer, format: int64 }
+        rank: { type: number }
+    CreatorPage:
+      type: object
+      properties:
+        creator:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            handle: { type: string }
+            channel_name: { type: string }
+            tagline: { type: string }
+            is_live: { type: boolean }
+            subscriber_count: { type: integer, format: int64 }
+        episodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedItem"
+        following: { type: boolean }
+    FollowState:
+      type: object
+      properties:
+        following: { type: boolean }
+        subscribers: { type: integer, format: int64 }
+    FeedItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string }
+        creator_id: { type: string, format: uuid }
+        creator_name: { type: string }
+        handle: { type: string }
+        duration_ms: { type: integer }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
     RegisterRequest:
       type: object
       required: [email, password]

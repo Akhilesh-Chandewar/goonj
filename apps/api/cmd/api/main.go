@@ -19,8 +19,13 @@ import (
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/engagement"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/history"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/playlists"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/search"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/social"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 )
 
@@ -105,12 +110,24 @@ func run() error {
 		health.Service{Name: "redis", Status: func(ctx context.Context) string { return pingRedis(rdb, ctx) }},
 	)
 
+	// Phase 4 modules: social graph, engagement, playlists, history, search.
+	engagementMod := engagement.NewModule(pool, logger)
+	playlistsMod := playlists.NewModule(pool, logger)
+	socialMod := social.NewModule(pool, logger)
+	historyMod := history.NewModule(pool, logger)
+	searchMod := search.NewModule(pool, logger)
+
 	application := app.New(app.Deps{
 		Log:            logger,
 		AllowedOrigins: cfg.AllowedOrigins,
 		Auth:           authMod,
 		Live:           liveMod,
 		Audio:          audioMod,
+		Engagement:     engagementMod,
+		Playlists:      playlistsMod,
+		Social:         socialMod,
+		History:        historyMod,
+		Search:         searchMod,
 		Health:         healthMod,
 	})
 

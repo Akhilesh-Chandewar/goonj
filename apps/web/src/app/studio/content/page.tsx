@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { AudioItem } from "@/lib/live-types";
+import type { AudioItem, StudioStats } from "@/lib/live-types";
 import { PublishButton } from "@/app/studio/publish-button";
+import { StudioStatsCard } from "@/components/studio-stats";
 
 const statusColor: Record<string, string> = {
   READY: "text-green-400 border-green-500/40 bg-green-500/10",
@@ -20,6 +21,7 @@ const isDraft = (a: AudioItem) =>
 export default function StudioContentPage() {
   const [items, setItems] = useState<AudioItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<StudioStats | null>(null);
 
   useEffect(() => {
     const load = () =>
@@ -27,6 +29,9 @@ export default function StudioContentPage() {
         .then((r) => setItems(r.data ?? []))
         .catch((e: Error) => setError(e.message));
     load();
+    api<StudioStats>("/audio/studio/stats")
+      .then(setStats)
+      .catch(() => {});
     const t = setInterval(load, 5000); // watch processing statuses
     return () => clearInterval(t);
   }, []);
@@ -49,6 +54,8 @@ export default function StudioContentPage() {
             {error} — log in as a creator.
           </p>
         )}
+
+        {stats && <StudioStatsCard stats={stats} />}
 
         {items && items.length === 0 && (
           <p className="rounded-xl border border-zinc-800 bg-zinc-900 p-10 text-center text-zinc-400">

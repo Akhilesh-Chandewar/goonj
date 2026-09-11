@@ -22,10 +22,16 @@ func NewHandlers(svc *Service, log *slog.Logger) *Handlers {
 	return &Handlers{svc: svc, log: log}
 }
 
-// Router mounts audio routes.
+// Router mounts audio routes on a fresh subrouter.
 func (h *Handlers) Router(mw *authmod.Middleware) http.Handler {
 	r := chi.NewRouter()
+	h.RegisterRoutes(r, mw)
+	return r
+}
 
+// RegisterRoutes registers audio endpoints on an existing mux so they can
+// share the /audio prefix with the engagement module (likes + comments).
+func (h *Handlers) RegisterRoutes(r chi.Router, mw *authmod.Middleware) {
 	r.Get("/", h.feed)
 	r.With(mw.RequireAuth).Get("/mine", h.mine)
 
@@ -37,7 +43,7 @@ func (h *Handlers) Router(mw *authmod.Middleware) http.Handler {
 	r.With(mw.RequireRole("CREATOR", "ADMIN")).Patch("/{id}", h.update)
 	r.With(mw.RequireRole("CREATOR", "ADMIN")).Delete("/{id}", h.delete)
 
-	return r
+	r.With(mw.RequireRole("CREATOR", "ADMIN")).Get("/studio/stats", h.studioStats)
 }
 
 func (h *Handlers) feed(w http.ResponseWriter, r *http.Request) {

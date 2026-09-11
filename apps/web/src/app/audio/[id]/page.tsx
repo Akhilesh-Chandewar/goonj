@@ -1,9 +1,18 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
+import { getAccessToken } from "@/lib/api";
+import { routes } from "@/lib/api";
 import { usePlayer, type Track } from "@/stores/player";
-import type { AudioItem, AudioSource } from "@/lib/live-types";
+import { useFollow, useLike, usePlaylists } from "@/lib/engagement";
+import type {
+  AudioItem,
+  AudioSource,
+  CommentItem,
+  CreatorPage,
+} from "@/lib/live-types";
 
 interface PlaybackResponse {
   audio: AudioItem;
@@ -15,13 +24,35 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
   const { id } = use(params);
   const [pb, setPb] = useState<PlaybackResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const playTrack = usePlayer((s) => s.playTrack);
+
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [replies, setReplies] = useState<CommentItem[]>([]);
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [playlistOpen, setPlaylistOpen] = useState(false);
+
+  const { state: likeState, toggle: toggleLike } = useLike(id);
+  const { playlists, addTo, create } = usePlaylists();
 
   useEffect(() => {
     api<PlaybackResponse>(`/audio/${id}/playback`)
       .then(setPb)
       .catch((e: Error) => setError(e.message));
+    loadComments();
   }, [id]);
+
+  const loadComments = () => {
+    api<{ data: { comments: CommentItem[]; replies: CommentItem[] } }>(
+      routes.audioComments(id)
+    )
+      .then((r) => {
+        setComments(r.data?.comments ?? []);
+        setReplies(r.data?.replies ?? []);
+      })
+      .catch(() => {});
+  };
 
   if (error) {
     return (
@@ -47,6 +78,37 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
     creator: a.creator_name || a.handle || "Unknown",
     durationMs: a.duration_ms,
     sources: pb.sources,
+  };
+
+  const guard = async (fn: () => Promise<void>) => {
+    setActionError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setActionError((e as Error).message);
+    }
+  };
+
+  const submitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draft.trim()) return;
+    await guard(async () => {
+      if (!getAccessToken()) throw new Error("Sign in to comment");
+      await api(routes.audioComments(id), {
+        method: "POST",
+        body: JSON.stringify({ body: draft, parent_id: replyTo }),
+      });
+      setDraft("");
+      setReplyTo(null);
+      loadComments();
+    });
+  };
+
+  const deleteComment = async (commentId: string) => {
+    await guard(async () => {
+      await api(routes.comment(commentId), { method: "DELETE" });
+      loadComments();
+    });
   };
 
   return (
@@ -75,18 +137,231 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
             </div>
           )}
 
-          <button
-            onClick={() => playTrack(track)}
-            className="mt-8 rounded-full bg-red-600 px-10 py-3 text-lg font-semibold hover:bg-red-500"
-          >
-            ▶ Play
-          </button>
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <button
+              onClick={() => playTrack(track)}
+              className="rounded-full bg-red-600 px-10 py-3 text-lg font-semibold hover:bg-red-500"
+            >
+              ▶ Play
+            </button>
+            <button
+              onClick={() => guard(toggleLike)}
+              className={`rounded-full border px-5 py-3 text-sm ${
+                likeState?.liked
+                  ? "border-red-500 bg-red-500/20 text-red-300"
+                  : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+              }`}
+              aria-pressed={likeState?.liked}
+            >
+              {likeState?.liked ? "♥" : "♡"} {likeState?.likes ?? 0}
+            </button>
+            <button
+              onClick={() => setPlaylistOpen((v) => !v)}
+              className="rounded-full border border-zinc-700 px-5 py-3 text-sm text-zinc-300 hover:border-zinc-500"
+            >
+              + Playlist
+            </button>
+          </div>
+          {actionError && (
+            <p className="mt-3 text-sm text-red-400">{actionError}</p>
+          )}
+
+          {playlistOpen && (
+            <div className="mx-auto mt-4 max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left text-sm">
+              {(playlists ?? []).length === 0 && (
+                <p className="mb-3 text-zinc-400">No playlists yet.</p>
+              )}
+              {(playlists ?? []).map((pl) => (
+                <button
+                  key={pl.id}
+                  onClick={() =>
+                    guard(async () => {
+                      await addTo(pl.id, id);
+                      setPlaylistOpen(false);
+                    })
+                  }
+                  className="block w-full rounded px-2 py-1.5 text-left hover:bg-zinc-800"
+                >
+                  {pl.title}{" "}
+                  <span className="text-zinc-500">({pl.item_count})</span>
+                </button>
+              ))}
+              <NewPlaylistInline onCreate={(title) => create(title, id)} />
+            </div>
+          )}
         </div>
 
         {a.description && (
           <p className="mt-8 leading-7 text-zinc-300">{a.description}</p>
         )}
+
+        {/* Comments */}
+        <section className="mt-12">
+          <h2 className="mb-4 text-lg font-semibold">
+            Comments {comments.length > 0 && `(${comments.length})`}
+          </h2>
+          <form onSubmit={submitComment} className="mb-6 flex gap-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={replyTo ? "Reply…" : "Add a comment…"}
+              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm outline-none focus:border-red-500"
+            />
+            {replyTo && (
+              <button
+                type="button"
+                onClick={() => setReplyTo(null)}
+                className="rounded-lg border border-zinc-700 px-3 text-sm text-zinc-400"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              className="rounded-lg bg-red-600 px-4 text-sm font-medium hover:bg-red-500"
+            >
+              Post
+            </button>
+          </form>
+
+          <ul className="space-y-4">
+            {comments.map((c) => (
+              <li key={c.id} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-zinc-200">{c.username}</span>
+                  <div className="flex items-center gap-3 text-xs text-zinc-500">
+                    <button
+                      onClick={() =>
+                        guard(async () => {
+                          if (!getAccessToken()) throw new Error("Sign in to react");
+                          await api(routes.commentLike(c.id), { method: "POST" });
+                          loadComments();
+                        })
+                      }
+                      className="hover:text-zinc-200"
+                    >
+                      ♡ {c.like_count}
+                    </button>
+                    <button
+                      onClick={() => setReplyTo(c.id)}
+                      className="hover:text-zinc-200"
+                    >
+                      Reply
+                    </button>
+                    {c.mine && (
+                      <button
+                        onClick={() => deleteComment(c.id)}
+                        className="hover:text-red-400"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">{c.body}</p>
+
+                {replies
+                  .filter((r) => r.parent_id === c.id)
+                  .map((r) => (
+                    <div
+                      key={r.id}
+                      className="mt-3 rounded-lg border-l-2 border-zinc-700 pl-3"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-zinc-300">{r.username}</span>
+                        <div className="flex gap-3 text-zinc-500">
+                          {r.mine && (
+                            <button
+                              onClick={() => deleteComment(r.id)}
+                              className="hover:text-red-400"
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mt-1 text-sm text-zinc-400">{r.body}</p>
+                    </div>
+                  ))}
+              </li>
+            ))}
+          </ul>
+          {comments.length === 0 && (
+            <p className="text-sm text-zinc-500">Be the first to comment.</p>
+          )}
+        </section>
+
+        <CreatorFooter creatorId={a.creator_id} />
       </div>
     </main>
+  );
+}
+
+function NewPlaylistInline({ onCreate }: { onCreate: (title: string) => Promise<unknown> }) {
+  const [title, setTitle] = useState("");
+  return (
+    <form
+      className="mt-3 flex gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        void onCreate(title).then(() => setTitle(""));
+      }}
+    >
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="New playlist…"
+        className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs outline-none focus:border-red-500"
+      />
+      <button className="rounded bg-zinc-800 px-2 py-1.5 text-xs hover:bg-zinc-700">
+        Create
+      </button>
+    </form>
+  );
+}
+
+function CreatorFooter({ creatorId }: { creatorId: string }) {
+  const [page, setPage] = useState<CreatorPage | null>(null);
+  const { state: followState, toggle: toggleFollow } = useFollow(creatorId);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<CreatorPage>(routes.creator(creatorId))
+      .then(setPage)
+      .catch(() => {});
+  }, [creatorId]);
+
+  if (!page) return null;
+
+  return (
+    <div className="mt-10 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <Link
+            href={`/creators/${creatorId}`}
+            className="font-semibold hover:text-red-300"
+          >
+            {page.creator.channel_name}
+          </Link>
+          <p className="text-sm text-zinc-500">
+            @{page.creator.handle} · {followState?.subscribers ?? page.creator.subscriber_count} subscribers
+          </p>
+        </div>
+        <button
+          onClick={() =>
+            toggleFollow().catch((e: Error) => setActionError(e.message))
+          }
+          className={`rounded-full px-5 py-2 text-sm font-medium ${
+            followState?.following
+              ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+              : "bg-red-600 text-white hover:bg-red-500"
+          }`}
+        >
+          {followState?.following ? "Following" : "Follow"}
+        </button>
+      </div>
+      {actionError && <p className="mt-2 text-sm text-red-400">{actionError}</p>}
+    </div>
   );
 }

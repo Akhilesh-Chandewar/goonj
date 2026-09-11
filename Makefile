@@ -3,7 +3,7 @@ SHELL := /bin/bash
 export PATH := $(HOME)/.local/go/bin:$(PATH)
 
 .PHONY: help up down logs ps build web-install web-dev web-build typecheck \
-        go-build go-test go-vet seed migrate docker-build ci
+        go-build go-test go-vet seed migrate docker-build e2e ci
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -57,5 +57,8 @@ docker-build: ## Build all images without starting
 
 typecheck: ## TypeScript check for all workspaces
 	bun --filter '*' typecheck
+
+e2e: ## Run Phase 4 end-to-end suite against the live compose stack
+	bash scripts/e2e-phase4.sh
 
 ci: go-vet go-test web-install web-build typecheck ## Everything CI runs

@@ -8,6 +8,21 @@
 
 import { create } from "zustand";
 
+/** Injected by the app shell so the store can call the API without cycles. */
+export interface PlayerTelemetry {
+  /** Report progress so continue-listening works across sessions. */
+  report?: (audioId: string, positionMs: number, durationMs: number) => void;
+  /** Fetch the saved position for an episode before starting it. */
+  resume?: (audioId: string) => Promise<number>;
+}
+
+let telemetry: PlayerTelemetry = {};
+
+/** Wire the player's history beacons once at startup. */
+export function setPlayerTelemetry(t: PlayerTelemetry) {
+  telemetry = t;
+}
+
 export interface Track {
   id: string;
   title: string;
@@ -62,13 +77,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   shuffle: false,
   repeat: "off",
 
-  playTrack: (track, queue) =>
+  playTrack: (track, queue) => {
     set((s) => ({
       current: track,
       queue: queue ?? (s.current ? [s.current, ...s.queue] : s.queue),
       playing: true,
       currentTime: 0,
-    })),
+    }));
+    void telemetry.resume?.(track.id).then((pos) => {
+      if (pos > 5000 && usePlayer.getState().current?.id === track.id) {
+        set({ currentTime: pos / 1000 });
+      }
+    });
+  },
 
   enqueue: (track) => set((s) => ({ queue: [...s.queue, track] })),
 
@@ -114,9 +135,35 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       repeat: s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off",
     })),
 
-  setProgress: (currentTime, duration) => set({ currentTime, duration }),
+  setProgress: (currentTime, duration) => {
+    set({ currentTime, duration });
+    maybeReport(currentTime, duration);
+  },
   setPlaying: (playing) => set({ playing }),
 }));
+
+/**
+ * Throttled history beacon: flush at most every 15s while playing, plus a
+ * final flush on pause/unload via pagehide in PlayerBar.
+ */
+let lastReportAt = 0;
+function maybeReport(currentTime: number, duration: number) {
+  const { current, playing } = usePlayer.getState();
+  if (!current || !telemetry.report || duration <= 0) return;
+  const now = Date.now();
+  if (!playing && now - lastReportAt < 15_000) return;
+  if (now - lastReportAt < 15_000) return;
+  lastReportAt = now;
+  telemetry.report(current.id, Math.round(currentTime * 1000), Math.round(duration * 1000));
+}
+
+/** Flush pending progress immediately (called on pause/pagehide). */
+export function flushProgress() {
+  const { current, currentTime, duration } = usePlayer.getState();
+  if (current && duration > 0) {
+    telemetry.report?.(current.id, Math.round(currentTime * 1000), Math.round(duration * 1000));
+  }
+}
 
 /** Pick the best available source URL for the requested quality. */
 export function sourceFor(track: Track, quality: string): string | null {

@@ -12,8 +12,13 @@ import (
 
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/engagement"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/history"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/playlists"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/search"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/social"
 )
 
 // Deps carries the modules the router mounts.
@@ -23,6 +28,11 @@ type Deps struct {
 	Auth           *auth.Module
 	Live           *live.Module
 	Audio          *audio.Module // nil when object storage is unavailable
+	Engagement     *engagement.Module
+	Playlists      *playlists.Module
+	Social         *social.Module
+	History        *history.Module
+	Search         *search.Module
 	Health         *health.Module
 }
 
@@ -48,9 +58,24 @@ func New(d Deps) *App {
 		v1.Mount("/health", d.Health.Router())
 		v1.Mount("/auth", d.Auth.Router())
 		v1.Mount("/live", d.Live.Router(d.Auth.Middleware))
+
+		// The audio module owns the /audio prefix; engagement (likes +
+		// comments) registers onto the same mux — chi forbids mounting a
+		// second handler on an existing path.
+		audioMux := chi.NewRouter()
 		if d.Audio != nil {
-			v1.Mount("/audio", d.Audio.Router(d.Auth.Middleware))
+			d.Audio.Handlers.RegisterRoutes(audioMux, d.Auth.Middleware)
 		}
+		if d.Engagement != nil {
+			d.Engagement.Handlers.RegisterRoutes(audioMux, d.Auth.Middleware)
+		}
+		v1.Mount("/audio", audioMux)
+
+		v1.Mount("/creators", d.Social.Router(d.Auth.Middleware))
+		v1.Mount("/subscriptions", d.Social.FeedRouter(d.Auth.Middleware))
+		v1.Mount("/playlists", d.Playlists.Router(d.Auth.Middleware))
+		v1.Mount("/history", d.History.Router(d.Auth.Middleware))
+		v1.Mount("/search", d.Search.Router(d.Auth.Middleware))
 	})
 
 	return &App{router: r}
