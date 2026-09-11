@@ -23,7 +23,12 @@ export default function LoginPage() {
       if (mode === "register") {
         const res = await api("/auth/register", {
           method: "POST",
-          body: JSON.stringify({ email, password, username, as_creator: asCreator }),
+          body: JSON.stringify({
+            email,
+            password,
+            username: username.toLowerCase(),
+            as_creator: asCreator,
+          }),
         });
         saveTokens((res as { tokens: { access_token: string; refresh_token: string; token_type: string; expires_in: number } }).tokens);
       } else {
@@ -35,7 +40,13 @@ export default function LoginPage() {
       }
       router.push(asCreator && mode === "register" ? "/studio/live" : "/live");
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      if (msg.includes("already registered")) {
+        setError("That email already has an account — switch to Log in below.");
+        setMode("login");
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -55,12 +66,21 @@ export default function LoginPage() {
 
         <div className="mt-6 space-y-4">
           {mode === "register" && (
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="username"
-              className="w-full rounded-lg bg-zinc-950 px-4 py-2.5 outline-none ring-zinc-700 focus:ring-2 focus:ring-red-500"
-            />
+            <div>
+              <input
+                value={username}
+                onChange={(e) =>
+                  setUsername(e.target.value.replace(/[^a-z0-9_]/g, "").slice(0, 30))
+                }
+                placeholder="username (a-z, 0-9, underscore)"
+                className="w-full rounded-lg bg-zinc-950 px-4 py-2.5 outline-none ring-zinc-700 focus:ring-2 focus:ring-red-500"
+              />
+              {username.length > 0 && username.length < 3 && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  At least 3 characters.
+                </p>
+              )}
+            </div>
           )}
           <input
             value={email}
@@ -93,7 +113,12 @@ export default function LoginPage() {
 
           <button
             onClick={submit}
-            disabled={busy || !email || !password}
+            disabled={
+              busy ||
+              !email ||
+              !password ||
+              (mode === "register" && username.length < 3)
+            }
             className="w-full rounded-full bg-red-600 py-3 font-semibold hover:bg-red-500 disabled:opacity-40"
           >
             {busy ? "…" : mode === "login" ? "Log in" : "Create account"}
