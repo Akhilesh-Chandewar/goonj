@@ -28,6 +28,7 @@ type Session struct {
 	Category       string     `json:"category"`
 	Status         string     `json:"status"`
 	Visibility     string     `json:"visibility"`
+	ScheduledAt    *time.Time `json:"scheduled_at,omitempty"` // planned start (SCHEDULED only)
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
 	PeakListeners  int        `json:"peak_listeners"`
@@ -56,13 +57,14 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const sessionColumns = `
 	s.id, s.creator_id, s.title, s.description, s.category, s.status,
-	s.visibility, s.started_at, s.ended_at, s.peak_listeners, s.total_listeners,
-	s.created_at, COALESCE(c.channel_name, ''), COALESCE(p.username, '')`
+	s.visibility, s.scheduled_at, s.started_at, s.ended_at,
+	s.peak_listeners, s.total_listeners, s.created_at,
+	COALESCE(c.channel_name, ''), COALESCE(p.username, '')`
 
 func scanSession(row pgx.Row) (*Session, error) {
 	var s Session
 	err := row.Scan(&s.ID, &s.CreatorID, &s.Title, &s.Description, &s.Category,
-		&s.Status, &s.Visibility, &s.StartedAt, &s.EndedAt,
+		&s.Status, &s.Visibility, &s.ScheduledAt, &s.StartedAt, &s.EndedAt,
 		&s.PeakListeners, &s.TotalListeners, &s.CreatedAt,
 		&s.CreatorName, &s.Handle)
 	if err != nil {
@@ -77,8 +79,8 @@ func (st *Store) Create(ctx context.Context, creatorID, title, description, cate
 		INSERT INTO live_sessions (creator_id, title, description, category, visibility)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, creator_id, title, description, category, status,
-			visibility, started_at, ended_at, peak_listeners, total_listeners,
-			created_at, '', ''`,
+			visibility, scheduled_at, started_at, ended_at,
+			peak_listeners, total_listeners, created_at, '', ''`,
 		creatorID, title, description, category, visibility)
 	return scanSession(row)
 }

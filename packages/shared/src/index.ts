@@ -43,6 +43,20 @@ export const API_ROUTES = {
   comment: (commentId: string) => `/audio/comments/${commentId}`,
   commentLike: (commentId: string) => `/audio/comments/${commentId}/like`,
   studioStats: "/audio/studio/stats",
+  // Phase 5 completion: notifications, reports, discovery, scheduling.
+  notifications: "/notifications",
+  notificationsUnread: "/notifications/unread-count",
+  notificationsReadAll: "/notifications/read-all",
+  notificationRead: (id: string) => `/notifications/${id}/read`,
+  reports: "/reports",
+  reportResolve: (id: string) => `/reports/${id}/resolve`,
+  reportDismiss: (id: string) => `/reports/${id}/dismiss`,
+  trending: "/trending",
+  recommendations: "/recommendations",
+  recommendationsSimilar: (id: string) => `/recommendations/audio/${id}`,
+  liveUpcoming: "/live/upcoming",
+  liveSchedule: (id: string) => `/live/${id}/schedule`,
+  audioTranscript: (id: string) => `/audio/${id}/transcript`,
 } as const;
 
 export type ApiRoute = (typeof API_ROUTES)[keyof typeof API_ROUTES];

@@ -74,6 +74,48 @@ make ci         # everything CI runs
 Environment: copy `.env.example` → `.env` (compose reads it; never commit
 `.env`).
 
+### Database policy — Docker is the only Postgres
+
+PostgreSQL runs exclusively as the compose container (`pgvector/pgvector:pg16`):
+
+```bash
+docker compose up -d postgres                                  # start
+docker compose exec postgres pg_isready -U goonj -d goonj      # check
+```
+
+The host port comes from `POSTGRES_HOST_PORT` in `.env` (dev default shifted
+to avoid colliding with anything local). A host-installed PostgreSQL server
+is **not** used by Goonj and can be removed without affecting the stack
+(pgAdmin, if installed, still connects fine to the Docker container over the
+published port). Apply migrations by running the seed image, which embeds
+`goose`:
+
+```bash
+docker compose run --rm seed   # migrations + seed data (idempotent)
+```
+
+### Store-layer integration tests
+
+Unit tests never touch infrastructure. Store-layer tests live in
+`apps/api/internal/integration` and run against real Postgres when
+`GOONJ_TEST_DATABASE` is set (skipped otherwise, so `go test ./...` stays
+green anywhere):
+
+```bash
+GOONJ_TEST_DATABASE="postgres://goonj:goonj@localhost:15433/goonj?sslmode=disable" \
+  go test ./internal/integration/...   # run from apps/api
+```
+
+CI runs the same suite against a `pgvector/pgvector:pg16` service container
+(`.github/workflows/ci.yml`).
+
+### JWT secret rotation
+
+`JWT_SECRET` signs new tokens; `JWT_SECRETS_PREVIOUS` (comma-separated,
+newest previous first) is still accepted for validation so a rotation needs
+no downtime: set both, deploy, then drop the previous secret once all
+sessions could have refreshed. The API and ws-gateway honor both variables.
+
 ## Roadmap
 
 Phase 0 ✅ scaffold · Phase 1 foundation (auth, upload→episode, player) ·

@@ -41,6 +41,10 @@ func (h *Handlers) Router(mw *authmod.Middleware) http.Handler {
 	r.With(mw.RequireAuth).Post("/{id}/reactions", h.react)
 	r.With(mw.RequireAuth).Post("/{id}/report", h.report)
 
+	// Scheduling: creator sets a planned start; the public list is open.
+	r.With(mw.RequireAuth).Post("/{id}/schedule", h.schedule)
+	r.Get("/upcoming", h.upcoming)
+
 	return r
 }
 

@@ -7,12 +7,16 @@ import type { LiveSession } from "@/lib/live-types";
 
 export default function LivePage() {
   const [sessions, setSessions] = useState<LiveSession[] | null>(null);
+  const [upcoming, setUpcoming] = useState<LiveSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<{ data: LiveSession[] }>("/live")
       .then((r) => setSessions(r.data ?? []))
       .catch((e: Error) => setError(e.message));
+    api<{ data: LiveSession[] }>("/live/upcoming")
+      .then((r) => setUpcoming(r.data ?? []))
+      .catch(() => setUpcoming([]));
   }, []);
 
   return (
@@ -42,6 +46,40 @@ export default function LivePage() {
               🔴 Go Live
             </Link>
           </div>
+        )}
+
+        {upcoming && upcoming.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-xl font-semibold text-zinc-200">
+              🗓 Upcoming shows
+            </h2>
+            <ul className="space-y-2">
+              {upcoming.map((s) => (
+                <li
+                  key={s.id}
+                  className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-3"
+                >
+                  <span className="text-sm font-medium text-zinc-100">
+                    {s.title}
+                  </span>
+                  <span className="text-sm text-zinc-400">
+                    {s.creator_name || s.handle || "Creator"}
+                  </span>
+                  <span className="ml-auto text-sm text-red-300">
+                    {s.scheduled_at
+                      ? new Date(s.scheduled_at).toLocaleString([], {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

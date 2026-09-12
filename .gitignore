@@ -25,3 +25,7 @@ apps/api/bin/
 
 # logs
 *.log
+
+# compiled go binaries
+apps/api/api
+apps/api/worker

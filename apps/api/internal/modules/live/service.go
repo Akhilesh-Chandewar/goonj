@@ -21,6 +21,7 @@ type Service struct {
 	streamer   Streamer
 	recorder   Recorder // nil when egress is unavailable
 	enqueuer   RecordingFinalizer
+	notifier   LiveNotifier // optional "went live" fan-out
 	log        *slog.Logger
 }
 
@@ -137,6 +138,28 @@ func (s *Service) Start(ctx context.Context, sessionID, userID, username string)
 	}
 	_ = s.store.SetCreatorLive(ctx, session.CreatorID, true)
 	s.store.AppendEvent(ctx, sessionID, "session.started", []byte(`{}`))
+
+	// Auto-start recording (PROBLEMS #7): the client-driven recording start
+	// missed the first seconds of the show. Room-composite egress does not
+	// need a published track, so starting here captures everything. The
+	// creator's StartRecordingNow remains as an idempotent fallback.
+	if s.recorder != nil {
+		if _, err := s.StartRecordingNow(ctx, sessionID, userID); err != nil {
+			s.log.Warn("auto-record failed; client fallback remains",
+				slog.String("session", sessionID), slog.Any("error", err))
+		}
+	}
+
+	// Fan out "went live" to followers (best-effort, off the hot path).
+	if s.notifier != nil {
+		sid, title := session.ID, session.Title
+		creatorID := session.CreatorID
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			s.notifier.NotifyLiveStarted(bg, creatorID, session.CreatorName, sid, title)
+		}()
+	}
 
 	fresh, err := s.store.Get(ctx, sessionID)
 	if err != nil {

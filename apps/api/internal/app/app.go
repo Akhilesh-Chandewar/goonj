@@ -17,7 +17,9 @@ import (
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/history"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/playlists"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/reports"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/search"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/social"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
@@ -37,6 +39,9 @@ type Deps struct {
 	Search         *search.Module
 	Translation    *translation.Module
 	AI             *ai.Handlers
+	Notifications  *notifications.Module
+	Reports        *reports.Handlers
+	Discovery      *search.DiscoveryHandlers
 	Health         *health.Module
 }
 
@@ -77,6 +82,15 @@ func New(d Deps) *App {
 		v1.Mount("/playlists", d.Playlists.Router(d.Auth.Middleware))
 		v1.Mount("/history", d.History.Router(d.Auth.Middleware))
 		v1.Mount("/search", d.Search.Router(d.Auth.Middleware))
+		if d.Notifications != nil {
+			v1.Mount("/notifications", d.Notifications.Router(d.Auth.Middleware))
+		}
+		if d.Reports != nil {
+			v1.Mount("/reports", d.Reports.Router(d.Auth.Middleware))
+		}
+		if d.Discovery != nil {
+			d.Discovery.RegisterRoutes(v1, d.Auth.Middleware)
+		}
 
 		// The audio module owns the /audio prefix; engagement (likes +
 		// comments) registers onto the same mux — chi forbids mounting a

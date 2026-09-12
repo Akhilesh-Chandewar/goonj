@@ -18,7 +18,9 @@ type StreamGrant struct {
 type StreamToken struct {
 	Token    string `json:"token"`
 	RoomName string `json:"room_name"`
-	// WSURL is the LiveKit endpoint listeners connect to.
+	// WSURL is the LiveKit endpoint listeners connect to. In production this
+	// must be a wss:// URL fronted by TLS; TURN (LIVEKIT_TURN_URL) is served
+	// by the LiveKit server config, not per-token.
 	WSURL string `json:"ws_url"`
 	// ExpiresAt is when the token stops working.
 	ExpiresAt time.Time `json:"expires_at"`
@@ -39,13 +41,21 @@ type Streamer interface {
 // LiveKitStreamer implements Streamer against a LiveKit server.
 type LiveKitStreamer struct {
 	host      string // ws(s)://host:port of the LiveKit server
+	clientURL string // what BROWSERS get in ws_url (may differ behind a proxy/TLS)
 	apiKey    string
 	apiSecret string
 	tokenTTL  time.Duration
 }
 
-func NewLiveKitStreamer(host, apiKey, apiSecret string) *LiveKitStreamer {
-	return &LiveKitStreamer{host: host, apiKey: apiKey, apiSecret: apiSecret, tokenTTL: 6 * time.Hour}
+// NewLiveKitStreamer builds the streamer. clientURL is optional: when empty
+// the server host is handed to browsers too. In production, set
+// LIVEKIT_CLIENT_URL to the public wss:// endpoint (TLS terminates at the
+// proxy/LiveKit; TURN runs server-side via rtc.turn config, PROBLEMS #5/#6).
+func NewLiveKitStreamer(host, clientURL, apiKey, apiSecret string) *LiveKitStreamer {
+	if clientURL == "" {
+		clientURL = host
+	}
+	return &LiveKitStreamer{host: host, clientURL: clientURL, apiKey: apiKey, apiSecret: apiSecret, tokenTTL: 6 * time.Hour}
 }
 
 // EnsureRoom creates an audio-only room. LiveKit auto-creates rooms on first
@@ -77,7 +87,7 @@ func (lk *LiveKitStreamer) JoinToken(_ context.Context, roomName, identity strin
 	return &StreamToken{
 		Token:     token,
 		RoomName:  roomName,
-		WSURL:     lk.host,
+		WSURL:     lk.clientURL,
 		ExpiresAt: time.Now().Add(ttl),
 	}, nil
 }

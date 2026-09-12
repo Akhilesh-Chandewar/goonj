@@ -28,6 +28,10 @@ type Config struct {
 	AccessKeyID      string
 	SecretAccessKey  string
 	UsePathStyle     bool // required for floci/MinIO
+	// CDNBaseURL (optional) rewrites playback URLs to CDN/base/key instead
+	// of presigned GETs. The CDN pulls from the bucket as origin (public-read
+	// policy or origin credentials like S3/R2 OAC).
+	CDNBaseURL string
 }
 
 // ObjectStore wraps S3 operations with dual-endpoint support.
@@ -35,6 +39,7 @@ type ObjectStore struct {
 	internal   *s3.Client
 	presignPub *s3.PresignClient // presigns against the public endpoint
 	bucket     string
+	cdnBase    string // optional; empty = always presign
 }
 
 // New builds the store and ensures the bucket exists (dev convenience; prod
@@ -73,6 +78,7 @@ func New(ctx context.Context, cfg Config) (*ObjectStore, error) {
 		internal:   internal,
 		presignPub: s3.NewPresignClient(public),
 		bucket:     cfg.Bucket,
+		cdnBase:    cfg.CDNBaseURL,
 	}
 	if err := st.ensureBucket(ctx); err != nil {
 		return nil, err
@@ -109,8 +115,13 @@ func (s *ObjectStore) PresignedPutURL(ctx context.Context, key string, contentTy
 	return req.URL, nil
 }
 
-// PresignedGetURL returns a time-limited playback/download URL.
+// PresignedGetURL returns a time-limited playback/download URL. When a CDN
+// base URL is configured, it returns CDN/base/key instead — cacheable at the
+// edge, no query-string signature (the CDN origin authenticates instead).
 func (s *ObjectStore) PresignedGetURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if s.cdnBase != "" {
+		return s.cdnBase + "/" + key, nil
+	}
 	req, err := s.presignPub.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),

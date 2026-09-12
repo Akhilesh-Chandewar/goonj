@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { usePlayer } from "@/stores/player";
 import { TrackCard, toTrack, type CardItem } from "@/components/track-card";
+import { NotificationBell } from "@/components/notification-bell";
 import type { AudioItem, HitAudio } from "@/lib/live-types";
 import { APP_NAME } from "@goonj/shared";
 
@@ -61,10 +62,12 @@ export default function Home() {
             <h1 className="text-4xl font-bold">{APP_NAME}</h1>
             <p className="text-zinc-400">Tune in. Go live.</p>
           </div>
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex items-center gap-4 text-sm">
             <Link href="/live" className="text-red-400 hover:underline">🔴 Live</Link>
+            <Link href="/discover" className="text-zinc-400 hover:underline">Discover</Link>
             <Link href="/library" className="text-zinc-400 hover:underline">Library</Link>
             <Link href="/studio/upload" className="text-zinc-400 hover:underline">Upload</Link>
+            <NotificationBell />
             <Link href="/login" className="text-zinc-400 hover:underline">
               {hasToken ? "Account" : "Login"}
             </Link>

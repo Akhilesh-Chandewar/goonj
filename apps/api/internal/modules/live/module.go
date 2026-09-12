@@ -6,6 +6,7 @@
 package live
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -17,11 +18,23 @@ import (
 
 // Config carries the streaming provider settings.
 type Config struct {
-	StreamingHost   string // LiveKit ws endpoint shown to clients
-	StreamingAPIKey string
-	StreamingSecret string
-	Recorder        Recorder           // nil disables recording (streams still run)
-	Finalizer       RecordingFinalizer // nil skips finalize enqueue
+	StreamingHost string // LiveKit endpoint used server-side (tokens, egress)
+	// StreamingClientURL is the endpoint browsers receive in ws_url; empty
+	// falls back to StreamingHost. Set to the public wss:// URL in prod so
+	// TLS terminates correctly (TURN is server-side rtc.turn config).
+	StreamingClientURL string
+	StreamingAPIKey    string
+	StreamingSecret    string
+	Recorder           Recorder           // nil disables recording (streams still run)
+	Finalizer          RecordingFinalizer // nil skips finalize enqueue
+	// Notifier fans out "went live" notifications to followers (optional).
+	Notifier LiveNotifier
+}
+
+// LiveNotifier is the notifications hook (kept as an interface so live never
+// imports the notifications module directly).
+type LiveNotifier interface {
+	NotifyLiveStarted(ctx context.Context, creatorID, creatorName, sessionID, title string)
 }
 
 // Module bundles the live module's collaborators.
@@ -38,8 +51,9 @@ func NewModule(pool *pgxpool.Pool, rdb *redis.Client, cfg Config, log *slog.Logg
 	store := NewStore(pool)
 	recordings := NewRecordingStore(pool)
 	presence := NewPresence(rdb, log)
-	streamer := NewLiveKitStreamer(cfg.StreamingHost, cfg.StreamingAPIKey, cfg.StreamingSecret)
+	streamer := NewLiveKitStreamer(cfg.StreamingHost, cfg.StreamingClientURL, cfg.StreamingAPIKey, cfg.StreamingSecret)
 	service := NewService(store, recordings, presence, streamer, cfg.Recorder, cfg.Finalizer, log)
+	service.notifier = cfg.Notifier
 
 	return &Module{
 		Service:    service,

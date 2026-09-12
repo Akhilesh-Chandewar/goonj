@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LiveKitRoom, useLocalMicTrack } from "@/lib/livekit-hooks";
 import TranslationStudio from "@/components/TranslationStudio";
-import { api } from "@/lib/api";
+import { api, routes } from "@/lib/api";
 import type {
   AudioItem,
   LiveRecording,
@@ -25,6 +25,8 @@ export default function StudioLivePage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
+  const [scheduledAt, setScheduledAt] = useState<string>("");
+  const [scheduleMsg, setScheduleMsg] = useState<string | null>(null);
 
   const createAndStart = async () => {
     setBusy(true);
@@ -57,6 +59,35 @@ export default function StudioLivePage() {
     } finally {
       setSession(null);
       setToken(null);
+      setBusy(false);
+    }
+  };
+
+  // Phase 5 scheduling: create a SCHEDULED session with a planned start;
+  // followers get a reminder ~10 minutes before. The show still goes live
+  // through the normal Start flow ("Start Broadcast" when it's time).
+  const createScheduled = async () => {
+    setBusy(true);
+    setError(null);
+    setScheduleMsg(null);
+    try {
+      const created = await api<LiveSession>("/live", {
+        method: "POST",
+        body: JSON.stringify({ title, description, visibility: "public" }),
+      });
+      await api(routes.liveSchedule(created.id), {
+        method: "POST",
+        body: JSON.stringify({ scheduled_at: new Date(scheduledAt).toISOString() }),
+      });
+      setScheduleMsg(
+        `Scheduled for ${new Date(scheduledAt).toLocaleString()} — followers get a reminder 10 min before. Start the broadcast from here at showtime.`
+      );
+      setTitle("");
+      setDescription("");
+      setScheduledAt("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
       setBusy(false);
     }
   };
@@ -105,7 +136,34 @@ export default function StudioLivePage() {
             >
               {busy ? "Starting…" : "🔴 Start Broadcast"}
             </button>
+
+            <div className="border-t border-zinc-800 pt-4">
+              <label className="mb-1 block text-sm text-zinc-400">
+                …or schedule it for later
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                  className="flex-1 rounded-lg bg-zinc-950 px-3 py-2 text-sm outline-none ring-zinc-700 focus:ring-2 focus:ring-red-500"
+                />
+                <button
+                  onClick={createScheduled}
+                  disabled={busy || !title.trim() || !scheduledAt}
+                  className="rounded-lg border border-zinc-700 px-4 text-sm font-medium hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  🗓 Schedule
+                </button>
+              </div>
+            </div>
           </div>
+        )}
+
+        {scheduleMsg && (
+          <p className="mt-4 rounded-lg border border-green-500/40 bg-green-500/10 p-4 text-sm text-green-300">
+            {scheduleMsg}
+          </p>
         )}
 
         {session && token && (

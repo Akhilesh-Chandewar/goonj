@@ -48,14 +48,30 @@ type Tokens struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
-// TokenService issues and validates tokens. jwtSecret comes from config.
+// TokenService issues and validates tokens.
+//
+// Secrets support zero-downtime rotation: JWT_SECRET is the primary key
+// used for signing; JWT_SECRETS_PREVIOUS (comma-separated) are still
+// accepted for validation only, so tokens minted before a rotation stay
+// valid until they naturally expire and clients re-login seamlessly.
 type TokenService struct {
-	secret []byte
-	redis  *redis.Client
+	secret  []byte // primary (signing) key
+	prior   [][]byte // previous keys (validation only)
+	redis   *redis.Client
 }
 
 func NewTokenService(secret string, rdb *redis.Client) *TokenService {
 	return &TokenService{secret: []byte(secret), redis: rdb}
+}
+
+// AddPriorSecret registers a previous signing key (oldest last). Validation
+// falls back to these after the primary key fails; signing always uses the
+// primary. Call once per previous key, newest previous first.
+func (s *TokenService) AddPriorSecret(secret string) {
+	if secret == "" {
+		return
+	}
+	s.prior = append(s.prior, []byte(secret))
 }
 
 // Claims are embedded in every access token.
@@ -115,19 +131,27 @@ func (s *TokenService) Issue(ctx context.Context, userID, role, username string)
 	}, nil
 }
 
-// Validate parses an access token and returns its claims.
+// Validate parses an access token and returns its claims. The signature is
+// checked against the primary secret first, then any prior secrets (rotation
+// grace window).
 func (s *TokenService) Validate(tokenString string) (*Claims, error) {
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+	keys := make([][]byte, 0, 1+len(s.prior))
+	keys = append(keys, s.secret)
+	keys = append(keys, s.prior...)
+
+	for _, key := range keys {
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+			return key, nil
+		})
+		if err == nil && token.Valid {
+			return claims, nil
 		}
-		return s.secret, nil
-	})
-	if err != nil || !token.Valid {
-		return nil, ErrInvalidToken
 	}
-	return claims, nil
+	return nil, ErrInvalidToken
 }
 
 // ValidateAccess validates an access token string into claims.

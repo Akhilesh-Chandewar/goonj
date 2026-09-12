@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Goonj API
-  version: 0.4.0
+  version: 0.5.0
   description: >-
     Audio-only platform API (on-demand + live). Phases 0-3 implemented
     (health, auth, upload pipeline, live core, live recordings). Phase 4 adds
@@ -15,6 +15,9 @@ tags:
   - name: auth
   - name: live
   - name: audio
+  - name: notifications
+  - name: moderation
+  - name: discovery
 paths:
   /ping:
     get:
@@ -444,6 +447,274 @@ paths:
         "200":
           description: Episode/like/live aggregates for the signed-in creator
       security: [{ bearerAuth: [] }]
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List the caller's notifications (Phase 5)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+  /notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: Unread badge count
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Count of unread notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread: { type: integer }
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark every notification read
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: ok
+  /notifications/{id}/read:
+    post:
+      tags: [notifications]
+      summary: Mark one notification read (owner-checked)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: ok
+  /reports:
+    post:
+      tags: [moderation]
+      summary: File a report against an episode or live session (Phase 5)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileReportRequest"
+      responses:
+        "201":
+          description: Report filed (duplicate pending reports collapse)
+        "400":
+          description: Missing target or invalid reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      tags: [moderation]
+      summary: Moderation queue (MODERATOR/ADMIN)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, RESOLVED, DISMISSED]
+            default: PENDING
+      responses:
+        "200":
+          description: Reports newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Report"
+        "403":
+          description: Not a moderator
+  /reports/{id}/resolve:
+    post:
+      tags: [moderation]
+      summary: Resolve a report (MODERATOR/ADMIN)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: ok
+        "404":
+          description: Not pending or not found
+  /reports/{id}/dismiss:
+    post:
+      tags: [moderation]
+      summary: Dismiss a report (MODERATOR/ADMIN)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: ok
+        "404":
+          description: Not pending or not found
+  /trending:
+    get:
+      tags: [discovery]
+      summary: Trending episodes (public, time-decayed ZSET)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Top episodes by weighted recent engagement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AudioHit"
+  /recommendations:
+    get:
+      tags: [discovery]
+      summary: Personalized feed seeded from the last listened episode (Phase 5)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 12, maximum: 50 }
+      responses:
+        "200":
+          description: Similar episodes; falls back to trending when no history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AudioHit"
+                  seed:
+                    type: string
+                    format: uuid
+                    nullable: true
+                    description: Episode the recommendations were seeded from
+  /recommendations/audio/{id}:
+    get:
+      tags: [discovery]
+      summary: More like this episode (pgvector similarity)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, maximum: 50 }
+      responses:
+        "200":
+          description: Nearest READY public episodes by transcript embedding
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AudioHit"
+  /live/upcoming:
+    get:
+      tags: [live]
+      summary: Public scheduled sessions with a future start (Phase 5)
+      responses:
+        "200":
+          description: Ordered by scheduled_at ascending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LiveSession"
+  /live/{id}/schedule:
+    post:
+      tags: [live]
+      summary: Set or clear a session's planned start (creator only, Phase 5)
+      description: >-
+        Pass a future RFC3339 time to schedule (within 30 days) or a zero
+        value to clear. Followers are reminded ~10 minutes before the start.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduled_at:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: Updated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSession"
+        "400":
+          description: Not owner, wrong status, or time out of window
+  /audio/{id}/transcript:
+    get:
+      tags: [audio]
+      summary: Transcript chunks and AI summary for an episode (Phase 5)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Timed chunks, oldest first; summary when generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcript"
+        "404":
+          description: No transcript produced yet
 components:
   securitySchemes:
     bearerAuth:
@@ -575,6 +846,137 @@ components:
       required: [error]
       properties:
         error: { type: string }
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [live_started, recording_ready, new_follower, session_reminder]
+        title: { type: string }
+        body: { type: string }
+        session_id:
+          type: string
+          format: uuid
+          nullable: true
+        audio_id:
+          type: string
+          format: uuid
+          nullable: true
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        read: { type: boolean }
+        created_at: { type: string, format: date-time }
+    FileReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        audio_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        reason:
+          type: string
+          enum: [spam, harassment, copyright, explicit, misinformation, other]
+        details:
+          type: string
+          maxLength: 1000
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reporter_id: { type: string, format: uuid }
+        audio_id:
+          type: string
+          format: uuid
+          nullable: true
+        session_id:
+          type: string
+          format: uuid
+          nullable: true
+        reason: { type: string }
+        details: { type: string }
+        status:
+          type: string
+          enum: [PENDING, RESOLVED, DISMISSED]
+        resolved_by:
+          type: string
+          format: uuid
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at: { type: string, format: date-time }
+    AudioHit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string }
+        creator_id: { type: string, format: uuid }
+        creator_name: { type: string }
+        handle: { type: string }
+        duration_ms: { type: integer }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+    LiveSession:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        creator_id: { type: string, format: uuid }
+        creator_name: { type: string }
+        handle: { type: string }
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        status:
+          type: string
+          enum: [SCHEDULED, LIVE, ENDED, CANCELLED]
+        visibility:
+          type: string
+          enum: [public, private]
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        peak_listeners: { type: integer }
+        total_listeners: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+    Transcript:
+      type: object
+      required: [audio_id, chunks]
+      properties:
+        audio_id: { type: string, format: uuid }
+        chunks:
+          type: array
+          items:
+            type: object
+            properties:
+              idx: { type: integer }
+              start_ms: { type: integer }
+              end_ms: { type: integer }
+              speaker:
+                type: string
+                nullable: true
+              text: { type: string }
+        summary:
+          type: object
+          nullable: true
+          properties:
+            summary: { type: string }
+            model: { type: string }
+            updated_at: { type: string, format: date-time }
     LiveRecording:
       type: object
       properties:

@@ -21,11 +21,16 @@ type Config struct {
 	LogLevel       string
 	AllowedOrigins []string
 	JWTSecret      string
+	// JWTSecretsPrevious holds superseded signing keys kept for
+	// validation-only grace after a rotation (newest previous first).
+	JWTSecretsPrevious []string
 
 	// Live streaming provider (LiveKit in Phase 2).
-	LiveKitHost   string
-	LiveKitAPIKey string
-	LiveKitSecret string
+	LiveKitHost string // server-side endpoint (tokens, egress)
+	// LiveKitClientURL is what browsers get in ws_url (public wss:// in prod).
+	LiveKitClientURL string
+	LiveKitAPIKey    string
+	LiveKitSecret    string
 
 	// Object storage (S3-compatible: floci/MinIO locally, S3/R2 in prod).
 	S3InternalEndpoint string // api/worker side (compose network)
@@ -35,6 +40,11 @@ type Config struct {
 	S3AccessKeyID      string
 	S3SecretAccessKey  string
 	S3UsePathStyle     bool
+	// S3CDNBaseURL serves processed audio through a CDN (S3_CDN_BASE_URL,
+	// e.g. https://cdn.example.com). When set, playback URLs become
+	// CDN/base/key instead of presigned GETs; the CDN origin holds bucket
+	// credentials (OAC/OAC-style) or the bucket is public-read by policy.
+	S3CDNBaseURL string
 
 	ShutdownGracePeriod time.Duration
 	ReadTimeout         time.Duration
@@ -44,25 +54,26 @@ type Config struct {
 // Load reads configuration from the environment for the named service.
 func Load(service string) Config {
 	return Config{
-		Env:            getEnv("GOONJ_ENV", "development"),
-		ServiceName:    service,
-		HTTPPort:       getEnv("HTTP_PORT", "8080"),
-		DatabaseURL:    getEnv("DATABASE_URL", "postgres://goonj:goonj@localhost:5432/goonj?sslmode=disable"),
-		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
-		AllowedOrigins: splitCSV(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
-		JWTSecret:      getEnv("JWT_SECRET", "dev-only-secret-change-me"),
-		LiveKitHost:    getEnv("LIVEKIT_URL", "ws://localhost:7880"),
-		LiveKitAPIKey:  getEnv("LIVEKIT_API_KEY", "devkey"),
-		LiveKitSecret:  getEnv("LIVEKIT_API_SECRET", "devsecret"),
+		Env:                getEnv("GOONJ_ENV", "development"),
+		ServiceName:        service,
+		HTTPPort:           getEnv("HTTP_PORT", "8080"),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://goonj:goonj@localhost:5432/goonj?sslmode=disable"),
+		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
+		AllowedOrigins:     splitCSV(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
+		JWTSecret:          getEnv("JWT_SECRET", "dev-only-secret-change-me"),
+		JWTSecretsPrevious: splitCSV(getEnv("JWT_SECRETS_PREVIOUS", "")),
+		LiveKitHost:        getEnv("LIVEKIT_URL", "ws://localhost:7880"),
+		LiveKitClientURL:   getEnv("LIVEKIT_CLIENT_URL", ""),
+		LiveKitSecret:      getEnv("LIVEKIT_API_SECRET", "devsecret"),
 
-		S3InternalEndpoint:  getEnv("S3_ENDPOINT", "http://localhost:4566"),
-		S3PublicEndpoint:    getEnv("S3_PUBLIC_ENDPOINT", "http://localhost:4566"),
-		S3Region:            getEnv("S3_REGION", "us-east-1"),
-		S3Bucket:            getEnv("S3_BUCKET", "goonj-audio-dev"),
-		S3AccessKeyID:       getEnv("S3_ACCESS_KEY_ID", "test"),
+		S3InternalEndpoint: getEnv("S3_ENDPOINT", "http://localhost:4566"),
+		S3PublicEndpoint:   getEnv("S3_PUBLIC_ENDPOINT", "http://localhost:4566"),
+		S3Region:           getEnv("S3_REGION", "us-east-1"),
+		S3Bucket:           getEnv("S3_BUCKET", "goonj-audio-dev"), S3AccessKeyID: getEnv("S3_ACCESS_KEY_ID", "test"),
 		S3SecretAccessKey:   getEnv("S3_SECRET_ACCESS_KEY", "test"),
 		S3UsePathStyle:      getEnv("S3_USE_PATH_STYLE", "true") == "true",
+		S3CDNBaseURL:        strings.TrimRight(getEnv("S3_CDN_BASE_URL", ""), "/"),
 		ShutdownGracePeriod: getDuration("SHUTDOWN_GRACE_PERIOD", 15*time.Second),
 		ReadTimeout:         getDuration("HTTP_READ_TIMEOUT", 10*time.Second),
 		WriteTimeout:        getDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),

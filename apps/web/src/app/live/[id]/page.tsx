@@ -13,6 +13,7 @@ import "@livekit/components-styles";
 import { api, getAccessToken } from "@/lib/api";
 import type { LiveSession, StreamToken } from "@/lib/live-types";
 import CaptionBar from "@/components/CaptionBar";
+import { ReportButton } from "@/components/report-button";
 
 const REACTIONS = [
   { id: "heart", emoji: "❤️" },
@@ -103,8 +104,9 @@ export default function LiveRoomPage({
               </span>
             </div>
             <h1 className="text-4xl font-bold">{join.session.title}</h1>
-            <p className="mt-2 text-zinc-400">
+            <p className="mt-2 flex items-center gap-3 text-zinc-400">
               {join.session.creator_name || join.session.handle}
+              <ReportButton sessionId={join.session.id} />
             </p>
             {join.session.description && (
               <p className="mt-4 max-w-2xl leading-7 text-zinc-300">

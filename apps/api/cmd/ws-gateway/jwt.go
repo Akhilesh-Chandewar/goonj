@@ -16,19 +16,24 @@ type claims struct {
 	jwt.RegisteredClaims
 }
 
-// parseAccessToken validates a token with the shared JWT secret.
+// parseAccessToken validates a token with the shared JWT secret. Prior
+// secrets (JWT_SECRETS_PREVIOUS) are accepted too, matching the API's
+// rotation grace window.
 func parseAccessToken(raw string) (*claims, error) {
-	secret := platform.Load("goonj-ws").JWTSecret
+	cfg := platform.Load("goonj-ws")
+	secrets := append([]string{cfg.JWTSecret}, cfg.JWTSecretsPrevious...)
 
-	c := &claims{}
-	token, err := jwt.ParseWithClaims(raw, c, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+	for _, secret := range secrets {
+		c := &claims{}
+		token, err := jwt.ParseWithClaims(raw, c, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+			return []byte(secret), nil
+		})
+		if err == nil && token.Valid {
+			return c, nil
 		}
-		return []byte(secret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, fmt.Errorf("invalid token")
 	}
-	return c, nil
+	return nil, fmt.Errorf("invalid token")
 }

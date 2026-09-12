@@ -15,19 +15,21 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/app"
-	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/ai"
-	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
 	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/ai"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/audio"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/auth"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/engagement"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/health"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/history"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/playlists"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/reports"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/search"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/social"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 )
 
@@ -65,6 +67,7 @@ func run() error {
 		AccessKeyID:      cfg.S3AccessKeyID,
 		SecretAccessKey:  cfg.S3SecretAccessKey,
 		UsePathStyle:     cfg.S3UsePathStyle,
+		CDNBaseURL:       cfg.S3CDNBaseURL,
 	})
 	if err != nil {
 		logger.Warn("object storage unavailable, uploads disabled", slog.Any("error", err))
@@ -79,7 +82,7 @@ func run() error {
 	defer queue.Close()
 
 	// Modules
-	authMod := auth.NewModule(pool, rdb, cfg.JWTSecret, logger)
+	authMod := auth.NewModule(pool, rdb, cfg.JWTSecret, cfg.JWTSecretsPrevious, logger)
 
 	// Egress recorder (Phase 3): sessions record when the client is wired;
 	// when LiveKit is unreachable, streams still run unrecorded.
@@ -93,12 +96,19 @@ func run() error {
 			SecretAccessKey: cfg.S3SecretAccessKey,
 			UsePathStyle:    cfg.S3UsePathStyle,
 		})
+	// Notifications service is shared between the live module (went-live
+	// fan-out) and the REST surface.
+	notifStore := notifications.NewStore(pool)
+	notifSvc := notifications.NewService(notifStore, logger)
+
 	liveMod := live.NewModule(pool, rdb, live.Config{
-		StreamingHost:   cfg.LiveKitHost,
-		StreamingAPIKey: cfg.LiveKitAPIKey,
-		StreamingSecret: cfg.LiveKitSecret,
-		Recorder:        egressRecorder{egress: lkEgress},
-		Finalizer:       recordingFinalizer{queue: queue},
+		StreamingHost:      cfg.LiveKitHost,
+		StreamingClientURL: cfg.LiveKitClientURL,
+		StreamingAPIKey:    cfg.LiveKitAPIKey,
+		StreamingSecret:    cfg.LiveKitSecret,
+		Recorder:           egressRecorder{egress: lkEgress},
+		Finalizer:          recordingFinalizer{queue: queue},
+		Notifier:           liveNotifierAdapter{svc: notifSvc},
 	}, logger)
 
 	var audioMod *audio.Module
@@ -123,6 +133,11 @@ func run() error {
 	translationMod := translation.NewModule(pool, rdb, logger)
 	aiMod := ai.NewHandlers(pool, logger)
 
+	// Phase 5 completion: notifications, moderation reports, discovery.
+	notificationsMod := &notifications.Module{Service: notifSvc, Handlers: notifications.NewHandlers(notifSvc, logger)}
+	reportsHandlers := reports.NewHandlers(reports.NewService(reports.NewStore(pool), logger), logger)
+	discoveryHandlers := search.NewDiscoveryHandlers(search.NewRecoStore(pool), rdb, logger)
+
 	application := app.New(app.Deps{
 		Log:            logger,
 		AllowedOrigins: cfg.AllowedOrigins,
@@ -136,6 +151,9 @@ func run() error {
 		Search:         searchMod,
 		Translation:    translationMod,
 		AI:             aiMod,
+		Notifications:  notificationsMod,
+		Reports:        reportsHandlers,
+		Discovery:      discoveryHandlers,
 		Health:         healthMod,
 	})
 
@@ -158,6 +176,14 @@ func run() error {
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	}
+}
+
+// liveNotifierAdapter bridges the live module's notifier interface to the
+// notifications service without a module-to-module import in live.
+type liveNotifierAdapter struct{ svc *notifications.Service }
+
+func (a liveNotifierAdapter) NotifyLiveStarted(ctx context.Context, creatorID, creatorName, sessionID, title string) {
+	a.svc.NotifyLiveStarted(ctx, creatorID, creatorName, sessionID, title)
 }
 
 func pingPostgres(pool *pgxpool.Pool, ctx context.Context) string {

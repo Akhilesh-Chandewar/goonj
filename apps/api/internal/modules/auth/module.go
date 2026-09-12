@@ -18,9 +18,14 @@ type Module struct {
 	Handlers   *Handlers
 }
 
-// NewModule wires the auth module together.
-func NewModule(pool *pgxpool.Pool, rdb *redis.Client, jwtSecret string, log *slog.Logger) *Module {
+// NewModule wires the auth module together. priorSecrets are superseded
+// JWT signing keys (newest previous first) accepted for validation only —
+// see TokenService for the rotation protocol.
+func NewModule(pool *pgxpool.Pool, rdb *redis.Client, jwtSecret string, priorSecrets []string, log *slog.Logger) *Module {
 	tokens := NewTokenService(jwtSecret, rdb)
+	for i := len(priorSecrets) - 1; i >= 0; i-- {
+		tokens.AddPriorSecret(priorSecrets[i])
+	}
 	service := NewService(pool, tokens, log)
 	middleware := NewMiddleware(tokens)
 	handlers := NewHandlers(service)

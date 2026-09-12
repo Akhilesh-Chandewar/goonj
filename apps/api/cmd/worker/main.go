@@ -16,9 +16,11 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/shared/tasks"
 )
@@ -63,6 +65,7 @@ func run() error {
 		AccessKeyID:      cfg.S3AccessKeyID,
 		SecretAccessKey:  cfg.S3SecretAccessKey,
 		UsePathStyle:     cfg.S3UsePathStyle,
+		CDNBaseURL:       cfg.S3CDNBaseURL,
 	})
 	if err != nil {
 		return err
@@ -73,6 +76,13 @@ func run() error {
 		return err
 	}
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})
+
+	// Redis client (presence reads, notifications): separate from the asynq
+	// producer client, which owns its own pool.
+	rdb, err := platform.NewRedis(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
 
 	// LiveKit egress client for finalize-recording jobs. Optional: the worker
 	// still processes uploads when LiveKit is down, finalize tasks retry.
@@ -98,8 +108,13 @@ func run() error {
 	handler.recordings = &recordingStore{pool: pool}
 	handler.drafts = &draftStore{pool: pool}
 	handler.ai = &aiStore{pool: pool}
+	handler.rdb = rdb
+	handler.notify = notifications.NewService(notifications.NewStore(pool), logger)
 	handler.enqueuer = asynq.NewClient(redisOpt)
 	defer handler.enqueuer.Close()
+
+	// Discovery loops: trending recompute + live presence sampling.
+	startDiscoveryLoops(ctx, pool, rdb, logger)
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeProcessAudio, handler.processAudio)
@@ -135,6 +150,8 @@ type audioHandler struct {
 	recordings *recordingStore
 	drafts     *draftStore
 	ai         *aiStore
+	rdb        *redis.Client
+	notify     *notifications.Service
 	enqueuer   *asynq.Client
 }
 

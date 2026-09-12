@@ -10,6 +10,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/shared/tasks"
 )
 
@@ -237,6 +238,29 @@ func (h *audioHandler) finalizeRecording(ctx context.Context, t *asynq.Task) err
 	// 4. Link the draft back to the recording.
 	if err := h.recordings.MarkConverted(ctx, payload.EgressID, audioID); err != nil {
 		return fmt.Errorf("mark converted: %w", err)
+	}
+
+	// Phase 5 completion: roll analytics up into live_analytics and notify
+	// the creator that their draft episode is ready. Both best-effort.
+	if h.rdb != nil {
+		if err := RollupLiveAnalytics(ctx, h.pool, h.rdb, h.log, sessionID, audioID); err != nil {
+			h.log.Warn("analytics rollup failed (non-fatal)",
+				slog.String("session", sessionID), slog.Any("error", err))
+		}
+	}
+	if h.notify != nil {
+		var creatorUser, title string
+		if err := h.pool.QueryRow(ctx, `
+			SELECT u.id::text, s.title FROM live_sessions s
+			JOIN creators c ON c.id = s.creator_id
+			JOIN users u ON u.id = c.user_id
+			WHERE s.id = $1`, sessionID).Scan(&creatorUser, &title); err == nil {
+			h.notify.Notify(ctx, []string{creatorUser}, notifications.Notification{
+				Type: notifications.TypeRecordingReady, Title: "Your recording is ready",
+				Body: title + " was converted to a draft episode — publish it from the studio.",
+				AudioID: &audioID,
+			})
+		}
 	}
 
 	h.log.Info("live recording converted to draft episode",

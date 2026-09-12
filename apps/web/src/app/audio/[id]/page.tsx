@@ -7,6 +7,7 @@ import { getAccessToken } from "@/lib/api";
 import { routes } from "@/lib/api";
 import { usePlayer, type Track } from "@/stores/player";
 import { useFollow, useLike, usePlaylists } from "@/lib/engagement";
+import { ReportButton } from "@/components/report-button";
 import type {
   AudioItem,
   AudioSource,
@@ -20,6 +21,25 @@ interface PlaybackResponse {
   waveform?: number[];
 }
 
+interface TranscriptChunk {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  speaker?: string;
+  text: string;
+}
+
+interface TranscriptPayload {
+  audio_id: string;
+  chunks: TranscriptChunk[];
+  summary?: { summary: string; model: string; updated_at: string };
+}
+
+const fmtTime = (ms: number) => {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+
 export default function AudioPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [pb, setPb] = useState<PlaybackResponse | null>(null);
@@ -32,6 +52,8 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [playlistOpen, setPlaylistOpen] = useState(false);
+  const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
+  const [showTranscript, setShowTranscript] = useState(false);
 
   const { state: likeState, toggle: toggleLike } = useLike(id);
   const { playlists, addTo, create } = usePlaylists();
@@ -41,6 +63,10 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
       .then(setPb)
       .catch((e: Error) => setError(e.message));
     loadComments();
+    // Transcript + AI summary are optional (produced by the AI worker).
+    api<TranscriptPayload>(routes.audioTranscript(id))
+      .then(setTranscript)
+      .catch(() => setTranscript(null));
   }, [id]);
 
   const loadComments = () => {
@@ -121,6 +147,8 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
           <h1 className="text-3xl font-bold">{a.title}</h1>
           <p className="mt-2 text-zinc-400">
             {a.creator_name || a.handle} · {Math.round((a.duration_ms || 0) / 60000)} min · {a.category}
+            <span className="mx-2 text-zinc-700">|</span>
+            <ReportButton audioId={a.id} />
           </p>
 
           {pb.waveform && pb.waveform.length > 0 && (
@@ -193,6 +221,49 @@ export default function AudioPage({ params }: { params: Promise<{ id: string }> 
 
         {a.description && (
           <p className="mt-8 leading-7 text-zinc-300">{a.description}</p>
+        )}
+
+        {/* AI summary + transcript (Phase 5) */}
+        {transcript && (
+          <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+            {transcript.summary && (
+              <div className="mb-4 rounded-xl border border-purple-500/30 bg-purple-500/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-purple-300">
+                  ✨ AI Summary
+                </p>
+                <p className="mt-1.5 text-sm leading-6 text-zinc-200">
+                  {transcript.summary.summary}
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowTranscript((v) => !v)}
+              className="flex w-full items-center justify-between text-sm font-medium text-zinc-300 hover:text-zinc-100"
+            >
+              <span>Transcript ({transcript.chunks.length} segments)</span>
+              <span>{showTranscript ? "▲" : "▼"}</span>
+            </button>
+            {showTranscript && (
+              <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-2">
+                {transcript.chunks.map((c) => (
+                  <div key={c.idx} className="flex gap-3 text-sm">
+                    <span className="shrink-0 font-mono text-xs text-red-400/80">
+                      {fmtTime(c.start_ms)}
+                    </span>
+                    <p className="leading-6 text-zinc-300">
+                      {c.speaker && (
+                        <span className="mr-1.5 font-medium text-zinc-400">
+                          {c.speaker}:
+                        </span>
+                      )}
+                      {c.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
 
         {/* Comments */}

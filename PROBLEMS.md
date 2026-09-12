@@ -239,13 +239,13 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 - **Fix:** `use_external_ip: false` for compose (advertise the container IP);
   production flips it back to `true` with published UDP range + TURN.
 
-### 7. Silent lead-in before recording starts ⚠️ (accepted for now)
+### 7. Silent lead-in before recording starts ✅
 - **Symptom:** the first seconds of a stream may be missing from the recording
   because recording starts only after the creator's client connects.
-- **Mitigation:** the web client requests `/recording/start` as soon as its
-  room connection is live; room-composite egress no longer waits for a
-  published track, which shrinks the gap. Server-side auto-start on session
-  `Start` is the eventual fix.
+- **Fix:** recording now auto-starts server-side in the live service's `Start`
+  (room-composite egress needs no published track, so nothing is missed). The
+  creator client's `/recording/start` call remains as an idempotent fallback
+  for the window where egress is briefly unavailable.
 
 ---
 
@@ -315,5 +315,5 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 ### 15. Access tokens expire mid-verification ✅
 - **Symptom:** API calls suddenly 401 during long E2E sessions.
 - **Fix:** 15-minute access TTL is intentional; re-login (or use the refresh
-  token) when a verification session outlives it. Future: refresh-on-401 in
-  the web client.
+  token) when a verification session outlives it. The web client now does
+  refresh-on-401 with single-flight rotation (`apps/web/src/lib/api.ts`).

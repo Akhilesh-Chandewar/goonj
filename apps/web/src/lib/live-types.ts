@@ -8,6 +8,8 @@ export interface LiveSession {
   category: string;
   status: "SCHEDULED" | "LIVE" | "ENDED" | "CANCELLED";
   visibility: "public" | "private";
+  /** Planned start for SCHEDULED sessions (Phase 5 scheduling). */
+  scheduled_at?: string;
   started_at?: string;
   ended_at?: string;
   peak_listeners: number;
@@ -200,6 +202,19 @@ export interface StudioStats {
     peak_listeners: number;
     total_listeners: number;
   };
+}
+
+/** One user-facing notification (Phase 5 completion). */
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  session_id?: string;
+  audio_id?: string;
+  actor_id?: string;
+  read: boolean;
+  created_at: string;
 }
 
 /** Status of the egress recording for an ended live session (Phase 3). */
