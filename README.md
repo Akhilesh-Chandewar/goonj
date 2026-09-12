@@ -277,9 +277,35 @@ open http://localhost:3000
 
 ### Screenshots
 
-`screenshots/` holds a current tour of the whole UI (home, live directory +
-room, discover/search, creator studio, upload, audio page with transcript +
-AI summary, library, moderator queue). Regenerate against a running stack:
+A current tour of the whole UI (public pages, creator studio, live room,
+audio page with transcript + AI summary, moderator queue) — rendered by
+[Playwright](scripts/screenshots.mjs) against the compose stack.
+
+#### Discovery & playback
+
+| Home | Live directory | Discover |
+|---|---|---|
+| ![Home](screenshots/01-home.png) | ![Live directory](screenshots/02-live-directory.png) | ![Discover](screenshots/03-discover.png) |
+
+| Search | Login | Library |
+|---|---|---|
+| ![Search](screenshots/04-search.png) | ![Login](screenshots/05-login.png) | ![Library](screenshots/11-library.png) |
+
+| Audio page — transcript + AI summary | Live room |
+|---|---|
+| ![Audio page](screenshots/10-audio-page.png) | ![Live room](screenshots/09-live-room.png) |
+
+#### Creator & moderation
+
+| Studio — go live | Studio — upload | Studio — content |
+|---|---|---|
+| ![Studio live](screenshots/06-studio-live.png) | ![Studio upload](screenshots/07-studio-upload.png) | ![Studio content](screenshots/08-studio-content.png) |
+
+| Moderator queue |
+|---|
+| ![Moderator queue](screenshots/12-moderator-queue.png) |
+
+Regenerate against a running stack:
 
 ```bash
 bun scripts/screenshots.mjs     # Playwright; writes 12 PNGs to screenshots/
