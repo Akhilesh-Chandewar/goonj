@@ -107,6 +107,16 @@ func MintAgentSession(ctx context.Context, apiKey string, req AgentSessionReques
 // apiKeyFromEnv reads the shared OpenAI key (same var the embedders use).
 func apiKeyFromEnv() string { return os.Getenv("OPENAI_API_KEY") }
 
+// realtimeConfigured reports whether the deployment actually targets OpenAI
+// for the Realtime API (live captions / voice agent). Other providers (Groq,
+// Azure, llama.cpp) speak the chat/STT API but not Realtime; surfacing that
+// as 503 lets the client hide the feature instead of erroring.
+func realtimeConfigured() bool {
+	base := strings.ToLower(os.Getenv("OPENAI_BASE_URL"))
+	// Empty base means the default (api.openai.com) — configured.
+	return base == "" || strings.Contains(base, "api.openai.com")
+}
+
 func mustJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {

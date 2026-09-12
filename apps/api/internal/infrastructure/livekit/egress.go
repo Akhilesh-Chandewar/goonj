@@ -78,6 +78,51 @@ type RecordingOutcome struct {
 	Error        string
 }
 
+// StartTrackPCM begins track egress streaming the source track's raw PCM
+// into the given websocket URL (the translator's PCMPump). Per LiveKit docs,
+// websocket output is audio-only, pcm_s16le at the track's sample rate —
+// exactly what the OpenAI Realtime translation session consumes. The
+// connection closes when the track is unpublished or the speaker leaves.
+func (e *Egress) StartTrackPCM(ctx context.Context, roomName, trackID, wsURL string) (egressID string, err error) {
+	info, err := e.egress.StartTrackEgress(ctx, &livekit.TrackEgressRequest{
+		RoomName: roomName,
+		TrackId:  trackID,
+		Output:   &livekit.TrackEgressRequest_WebsocketUrl{WebsocketUrl: wsURL},
+	})
+	if err != nil {
+		return "", fmt.Errorf("start track egress: %w", err)
+	}
+	return info.EgressId, nil
+}
+
+// ListParticipants returns the participants currently in a room (used to
+// locate the creator's published microphone track for the translator's
+// track egress).
+func (e *Egress) ListParticipants(ctx context.Context, roomName string) ([]*livekit.ParticipantInfo, error) {
+	res, err := e.room.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: roomName})
+	if err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
+	}
+	return res.Participants, nil
+}
+
+// SourceMicrophoneTrack finds the first published microphone track in a room
+// (the creator's, in the single-publisher model Goonj uses).
+func (e *Egress) SourceMicrophoneTrack(ctx context.Context, roomName string) (trackID string, err error) {
+	participants, err := e.ListParticipants(ctx, roomName)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range participants {
+		for _, tr := range p.Tracks {
+			if tr.Type == livekit.TrackType_AUDIO && tr.Source == livekit.TrackSource_MICROPHONE {
+				return tr.Sid, nil
+			}
+		}
+	}
+	return "", ErrEgressNotFound
+}
+
 // StartRecording begins room-composite egress writing an MP3 to the
 // configured bucket under <prefix>/<roomName>-<time>.mp3. The room is created
 // explicitly first: egress cannot start on a room that does not exist yet

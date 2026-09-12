@@ -65,6 +65,7 @@ func Load(service string) Config {
 		JWTSecretsPrevious: splitCSV(getEnv("JWT_SECRETS_PREVIOUS", "")),
 		LiveKitHost:        getEnv("LIVEKIT_URL", "ws://localhost:7880"),
 		LiveKitClientURL:   getEnv("LIVEKIT_CLIENT_URL", ""),
+		LiveKitAPIKey:      getEnv("LIVEKIT_API_KEY", "devkey"),
 		LiveKitSecret:      getEnv("LIVEKIT_API_SECRET", "devsecret"),
 
 		S3InternalEndpoint: getEnv("S3_ENDPOINT", "http://localhost:4566"),

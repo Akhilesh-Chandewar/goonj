@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	livemod "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
 	notifmod "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
 	reportsmod "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/reports"
-	livemod "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/live"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -250,6 +250,42 @@ func TestLiveScheduleFlow(t *testing.T) {
 	for _, s := range due {
 		if s.ID == sess.ID {
 			t.Fatal("reminder dedupe marker failed")
+		}
+	}
+}
+
+// TestFollowerIDsSQL guards the went-live fan-out query against column drift.
+// Regression context: the query referenced a nonexistent follower_id column and
+// NotifyLiveStarted swallowed the error, so went-live notifications silently
+// never fired for any follower.
+func TestFollowerIDsSQL(t *testing.T) {
+	pool := testPool(t)
+	store := notifmod.NewStore(pool)
+	ctx := context.Background()
+
+	creatorUser := seedUser(t, pool, "it-fanout-creator@example.test", "CREATOR")
+	creatorID := seedCreator(t, pool, creatorUser)
+	f1 := seedUser(t, pool, "it-fanout-a@example.test", "USER")
+	f2 := seedUser(t, pool, "it-fanout-b@example.test", "USER")
+	for _, f := range []string{f1, f2} {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO follows (user_id, creator_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			f, creatorID); err != nil {
+			t.Fatalf("seed follow: %v", err)
+		}
+	}
+
+	ids, err := store.FollowerIDs(ctx, creatorID)
+	if err != nil {
+		t.Fatalf("FollowerIDs: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	for _, want := range []string{f1, f2} {
+		if !got[want] {
+			t.Fatalf("FollowerIDs missing follower %s; got %v", want, ids)
 		}
 	}
 }

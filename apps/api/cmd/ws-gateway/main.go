@@ -76,6 +76,10 @@ func run() error {
 	mux.HandleFunc("/ws/live/", func(w http.ResponseWriter, r *http.Request) {
 		serveRoom(hub, w, r, logger)
 	})
+	// Translated audio (Phase 5.5): raw PCM frames per (session, language).
+	mux.HandleFunc("/ws/translate/", func(w http.ResponseWriter, r *http.Request) {
+		hub.serveTranslateAudio(w, r, logger)
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

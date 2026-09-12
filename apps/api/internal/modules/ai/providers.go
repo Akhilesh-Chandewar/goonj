@@ -1,16 +1,25 @@
 package ai
 
+import "os"
+
 // Default provider selection shared by every consumer. The embedding worker
 // (document side) and the semantic search endpoint (query side) MUST use the
 // same embedder or vectors are incomparable — pick here, never locally.
 
-// DefaultEmbedder returns the deployment's embedder: OpenAI when
-// OPENAI_API_KEY is set, else the deterministic local hasher. The hash
+// DefaultEmbedder returns the deployment's embedder: OpenAI-compatible when
+// OPENAI_API_KEY is set and embeddings are not disabled via
+// EMBEDDINGS_DISABLED=1, else the deterministic local hasher. The hash
 // dimension must match the migration's vector(1536) column exactly, or
 // inserts fail.
+//
+// The disable flag exists for providers that speak the OpenAI chat/STT API
+// but serve no /embeddings endpoint (e.g. Groq) — without it, merely setting
+// the key would break semantic-search indexing.
 func DefaultEmbedder() Embedder {
-	if e := NewOpenAIEmbedder(); e != nil {
-		return e
+	if os.Getenv("EMBEDDINGS_DISABLED") != "1" {
+		if e := NewOpenAIEmbedder(); e != nil {
+			return e
+		}
 	}
 	return NewHashEmbedder(1536)
 }

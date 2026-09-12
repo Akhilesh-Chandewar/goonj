@@ -46,6 +46,11 @@ func (h *Handlers) agentSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Realtime features are OpenAI-only (Groq/Azure proxies don't serve it).
+	if h.apiKey == "" || !realtimeConfigured() {
+		writeErr(w, http.StatusServiceUnavailable, "voice agent unavailable: needs an OpenAI Realtime key (OPENAI_BASE_URL=https://api.openai.com)")
+		return
+	}
 	resp, err := MintAgentSession(r.Context(), h.apiKey, req)
 	if err != nil {
 		if err == ErrUnavailable {

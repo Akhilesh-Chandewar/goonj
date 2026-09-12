@@ -111,10 +111,10 @@ func (s *Store) MarkAllRead(ctx context.Context, userID string) error {
 }
 
 // FollowerIDs returns the user ids following a creator (fan-out source).
+// follows.user_id is the follower; follows.creator_id references creators.id.
 func (s *Store) FollowerIDs(ctx context.Context, creatorID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT f.follower_id::text FROM follows f
-		JOIN creators c ON c.id = f.creator_id
+		SELECT f.user_id::text FROM follows f
 		WHERE f.creator_id = $1`, creatorID)
 	if err != nil {
 		return nil, err
@@ -168,7 +168,11 @@ func (s *Service) Notify(ctx context.Context, userIDs []string, n Notification) 
 // live module on session Start.
 func (s *Service) NotifyLiveStarted(ctx context.Context, creatorID, creatorName, sessionID, title string) {
 	ids, err := s.store.FollowerIDs(ctx, creatorID)
-	if err != nil || len(ids) == 0 {
+	if err != nil {
+		s.log.Error("went-live fan-out failed", slog.String("creator", creatorID), slog.Any("error", err))
+		return
+	}
+	if len(ids) == 0 {
 		return
 	}
 	sid := sessionID

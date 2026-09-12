@@ -68,9 +68,9 @@ func (s *Service) MintBrowserSession(ctx context.Context, sessionID string, req 
 		return nil, err
 	}
 	return &BrowserSessionResponse{
-		ClientSecret:  resp.ClientSecret.Value,
-		ExpiresAt:     resp.ClientSecret.ExpiresAt,
-		Model:         resp.Model,
+		ClientSecret: resp.ClientSecret.Value,
+		ExpiresAt:    resp.ClientSecret.ExpiresAt,
+		Model:        resp.Model,
 		// OpenAI's WebRTC SDP exchange endpoint for translation calls.
 		WebRTCURL:     "https://api.openai.com/v1/realtime/translations/calls",
 		EventsChannel: "oai-events",

@@ -21,6 +21,7 @@ import (
 	livekitinfra "github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/livekit"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/infrastructure/storage"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/notifications"
+	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/modules/translation"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/platform"
 	"github.com/Akhilesh-Chandewar/goonj/apps/api/internal/shared/tasks"
 )
@@ -115,6 +116,11 @@ func run() error {
 
 	// Discovery loops: trending recompute + live presence sampling.
 	startDiscoveryLoops(ctx, pool, rdb, logger)
+
+	// Realtime translator (Phase 5.5): subscribes to the translation control
+	// channel and runs server-side per-language translation for live rooms.
+	// Requires an OpenAI key (chat/Realtime); harmless when unset.
+	startRealtimeTranslator(ctx, rdb, cfg, egress, logger)
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeProcessAudio, handler.processAudio)
@@ -271,6 +277,27 @@ func (h *audioHandler) fail(ctx context.Context, audioID string, cause error) er
 	// Validation failures are permanent; infra failures may retry. Simplify:
 	// return the error so Asynq retries a few times before the DLQ.
 	return cause
+}
+
+// startRealtimeTranslator launches the always-on translation loop when an
+// OpenAI key is present. The egress client may be nil (no LiveKit); in that
+// case the loop still runs but cannot resolve source tracks, so translation
+// sessions simply never start.
+func startRealtimeTranslator(ctx context.Context, rdb *redis.Client, cfg platform.Config, egress *livekitinfra.Egress, log *slog.Logger) {
+	if cfg.LiveKitHost == "" || egress == nil {
+		log.Info("realtime translator disabled: no LiveKit")
+		return
+	}
+	live := translation.NewLiveKitLiveInfo(egress)
+	// The pump must be reachable from the livekit-egress container. In
+	// compose, worker's DNS name is "worker"; native runs use localhost.
+	pumpAddr := os.Getenv("TRANSLATOR_PUMP_ADDR")
+	if pumpAddr == "" {
+		pumpAddr = "localhost:9600"
+	}
+	tr := translation.NewTranslator(rdb, os.Getenv("OPENAI_API_KEY"), pumpAddr, live, egress, log)
+	go tr.Run(ctx)
+	log.Info("realtime translator enabled", slog.String("pump", pumpAddr))
 }
 
 func (h *audioHandler) download(ctx context.Context, key, dest string) error {

@@ -51,10 +51,14 @@ services:
       EGRESS_CONFIG_FILE: /etc/livekit-egress.yaml
     volumes:
       - ./apps/api/infra/livekit-egress.yaml:/etc/livekit-egress.yaml:ro
+    # The realtime translator's PCMPump runs inside the worker container on
+    # :9600; track egress dials it to stream raw PCM for translation. DNS for
+    # `worker` resolves via livekit's compose network (shared netns).
     depends_on:
       - livekit
       - redis
       - floci
+      - worker
 
   # S3-compatible storage for uploads and processed audio (browser-reachable).
   # NOTE: floci's distroless image has no shell/wget, so no container
@@ -131,6 +135,12 @@ services:
       OPENAI_SUMMARY_MODEL: ${OPENAI_SUMMARY_MODEL:-gpt-4o-mini}
       WHISPER_CPP_BIN: ${WHISPER_CPP_BIN:-}
       WHISPER_CPP_MODEL: ${WHISPER_CPP_MODEL:-}
+      # Set to 1 when OPENAI_BASE_URL points at a provider without an
+      # /embeddings endpoint (e.g. Groq); hash embedder takes over.
+      EMBEDDINGS_DISABLED: ${EMBEDDINGS_DISABLED:-0}
+      # Realtime translator (Phase 5.5): the PCMPump listens here and the
+      # livekit-egress container must reach it at worker:9600.
+      TRANSLATOR_PUMP_ADDR: worker:9600
     depends_on:
       redis:
         condition: service_healthy

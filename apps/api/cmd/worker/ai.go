@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -131,12 +132,14 @@ func (h *audioHandler) transcribeAudio(ctx context.Context, t *asynq.Task) error
 
 	// The payload carries a remote object key; both backends want a local
 	// file (OpenAI posts it, whisper.cpp runs ffmpeg on it) — fetch first.
+	// Preserve the original extension: S3 STT APIs reject extensionless
+	// uploads because they sniff the format from the file name.
 	workDir, err := os.MkdirTemp("", "goonj-stt-")
 	if err != nil {
 		return fmt.Errorf("create workdir: %w", err)
 	}
 	defer os.RemoveAll(workDir)
-	audioPath := workDir + "/input"
+	audioPath := workDir + "/input" + filepath.Ext(payload.StorageKey)
 	if err := h.download(ctx, payload.StorageKey, audioPath); err != nil {
 		return fmt.Errorf("download for transcription: %w", err)
 	}
@@ -148,6 +151,8 @@ func (h *audioHandler) transcribeAudio(ctx context.Context, t *asynq.Task) error
 				slog.String("audio", payload.AudioID))
 			return nil
 		}
+		h.log.Error("transcription failed",
+			slog.String("audio", payload.AudioID), slog.Any("error", err))
 		return fmt.Errorf("transcribe: %w", err)
 	}
 
@@ -230,6 +235,13 @@ func (h *audioHandler) embedAudio(ctx context.Context, t *asynq.Task) error {
 	}
 
 	summarizer := ai.DefaultSummarizer()
+	// Skip the LLM when the transcript is effectively empty (instrumentals,
+	// silence): models refuse with an unhelpful canned line and we pay for it.
+	if strings.TrimSpace(full.String()) == "" || utf8.RuneCountInString(full.String()) < 20 {
+		h.log.Info("transcript too short to summarize; skipping",
+			slog.String("audio", payload.AudioID))
+		return nil
+	}
 	if summary, err := summarizer.Summarize(ctx, full.String()); err != nil {
 		// Summary is a nice-to-have: log and continue; chunks are stored.
 		h.log.Warn("summary generation failed",

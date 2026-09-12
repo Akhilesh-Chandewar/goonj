@@ -6,6 +6,10 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
+COPY packages/api-client/package.json packages/api-client/
+# schema.gen.ts is a generated source file, not an install artifact — include it
+# so the workspace's typecheck/build steps see the generated types.
+COPY packages/api-client/src/schema.gen.ts packages/api-client/src/schema.gen.ts
 RUN bun install --frozen-lockfile
 COPY apps/web apps/web
 COPY packages packages
