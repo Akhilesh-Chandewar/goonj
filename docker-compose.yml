@@ -71,7 +71,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.go
+      dockerfile: Go.Dockerfile
     command: ["api"]
     environment:
       GOONJ_ENV: ${GOONJ_ENV:-development}
@@ -112,7 +112,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: Dockerfile.go
+      dockerfile: Go.Dockerfile
     command: ["worker"]
     environment:
       GOONJ_ENV: ${GOONJ_ENV:-development}
@@ -156,7 +156,7 @@ services:
   ws-gateway:
     build:
       context: .
-      dockerfile: Dockerfile.go
+      dockerfile: Go.Dockerfile
     command: ["ws-gateway"]
     environment:
       GOONJ_ENV: ${GOONJ_ENV:-development}
@@ -171,7 +171,7 @@ services:
   seed:
     build:
       context: .
-      dockerfile: Dockerfile.go
+      dockerfile: Go.Dockerfile
     command: ["seed"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable

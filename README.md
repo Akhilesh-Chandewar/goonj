@@ -185,7 +185,7 @@ chat log + captions persist alongside; presence samples roll up into live_analyt
 | livekit | `livekit/livekit-server` | audio-only config, `use_external_ip:false` for compose networking |
 | livekit-egress | `livekit/egress` | shares livekit's netns (mixed-content workaround); dials `worker:9600` for translation PCM |
 | floci | `floci/floci` | S3-compatible, path-style |
-| api / worker / ws-gateway / seed | `Dockerfile.go` | one image, four entrypoints |
+| api / worker / ws-gateway / seed | `Go.Dockerfile` | one image, four entrypoints |
 | web | `Dockerfile.web` | Next.js standalone |
 
 ---
@@ -226,7 +226,7 @@ goonj/
 │   └── api-client/             # @goonj/api-client: generated types + typed fetch
 ├── openapi/openapi.yaml        # API contract (v0.5.0)
 ├── docker-compose.yml          # full local stack
-├── Dockerfile.go / Dockerfile.web
+├── Go.Dockerfile / Dockerfile.web
 ├── Makefile · .env.example
 └── PLAN.md · PROBLEMS.md · TODO.md
 ```

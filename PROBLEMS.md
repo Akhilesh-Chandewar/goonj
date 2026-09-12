@@ -293,7 +293,7 @@ Status: ✅ resolved · ⚠️ open / accepted limitation
 
 ### 13. goose migrations must be embedded in the shipped image ✅
 - **Symptom:** release containers had no migrations; seed job couldn't run.
-- **Fix:** `Dockerfile.go` copies `apps/api/migrations` into the image
+- **Fix:** `Go.Dockerfile` copies `apps/api/migrations` into the image
   (`MIGRATIONS_DIR=/migrations`); one image builds all four binaries and
   compose picks the entrypoint per service.
 
