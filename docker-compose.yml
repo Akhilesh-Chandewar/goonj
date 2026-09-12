@@ -82,6 +82,9 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      # Browser-facing media endpoint for join tokens (defaults to LIVEKIT_URL
+      # when empty — browser and server must resolve LiveKit the same way).
+      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
       S3_ENDPOINT: http://floci:4566
@@ -117,6 +120,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-goonj}:${POSTGRES_PASSWORD:-goonj}@postgres:5432/${POSTGRES_DB:-goonj}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      # Browser-facing media endpoint for join tokens (defaults to LIVEKIT_URL
+      # when empty — browser and server must resolve LiveKit the same way).
+      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
       S3_ENDPOINT: http://floci:4566
@@ -178,8 +184,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        # Build-time inlined into the browser bundle (see Dockerfile.web).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8082}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8082}
     ports:
       - "${WEB_HOST_PORT:-3000}:3000"
     depends_on:

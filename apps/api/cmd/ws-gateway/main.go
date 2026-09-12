@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -131,7 +132,7 @@ func serveRoom(hub *hub, w http.ResponseWriter, r *http.Request, logger *slog.Lo
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, nil)
+	conn, err := websocket.Accept(w, r, acceptOptions())
 	if err != nil {
 		logger.Warn("websocket accept failed", slog.Any("error", err))
 		return
@@ -323,4 +324,19 @@ func validReaction(r string) bool {
 		return true
 	}
 	return false
+}
+// acceptOptions permits cross-origin WebSocket handshakes from the allowed
+// web origins (ALLOWED_ORIGINS). The coder/websocket default REJECTS any
+// Origin that does not match the Host — with the web app on :13000 and the
+// gateway on :18081, every browser connect (chat, captions, translated
+// audio) failed with "request Origin ... is not authorized for Host".
+func acceptOptions() *websocket.AcceptOptions {
+	patterns := []string{"localhost:*", "127.0.0.1:*"} // local dev defaults
+	for _, o := range platform.Load("goonj-ws").AllowedOrigins {
+		host := strings.TrimPrefix(strings.TrimPrefix(o, "https://"), "http://")
+		if host != "" {
+			patterns = append(patterns, host)
+		}
+	}
+	return &websocket.AcceptOptions{OriginPatterns: patterns}
 }

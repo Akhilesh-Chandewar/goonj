@@ -63,9 +63,20 @@ func (h *Handlers) suggestions(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
+	// Marshal first: if encoding fails (NaN/Inf from a bad rank, context bug,
+	// …) we must not have already sent a 200 with no body — clients would see
+	// a silent empty response instead of a real error.
+	raw, err := json.Marshal(body)
+	if err != nil {
+		slog.Error("json marshal failed", slog.Any("error", err))
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"response serialization failed"}`))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
+	_, _ = w.Write(raw)
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {

@@ -47,7 +47,7 @@ func (h *hub) serveTranslateAudio(w http.ResponseWriter, r *http.Request, logger
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, nil)
+	conn, err := websocket.Accept(w, r, acceptOptions())
 	if err != nil {
 		return
 	}

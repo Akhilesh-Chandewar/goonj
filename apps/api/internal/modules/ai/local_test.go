@@ -35,6 +35,27 @@ func TestHashEmbedderDeterministicAndNormalized(t *testing.T) {
 	}
 }
 
+// TestHashEmbedderNeverZeroVector guards the pgvector NaN trap: a token-free
+// text (".", punctuation, whitespace) would normalize to the zero vector,
+// and cosine distance against zero is NaN. NaN ranks then break JSON
+// encoding (zero-byte 200 responses) and pollute ANN indexes.
+func TestHashEmbedderNeverZeroVector(t *testing.T) {
+	e := NewHashEmbedder(256)
+	vecs, err := e.Embed(context.Background(), []string{".", "   ", "... .", ""})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	for i, v := range vecs {
+		var norm float64
+		for _, x := range v {
+			norm += float64(x) * float64(x)
+		}
+		if math.Abs(norm-1) > 1e-5 {
+			t.Fatalf("case %d: zero/degenerate vector (norm=%f) — must be a unit vector", i, norm)
+		}
+	}
+}
+
 func TestHashEmbedderSimilarTextsCloserThanDissimilar(t *testing.T) {
 	e := NewHashEmbedder(256)
 	vecs, err := e.Embed(context.Background(), []string{

@@ -13,6 +13,13 @@ COPY packages/api-client/src/schema.gen.ts packages/api-client/src/schema.gen.ts
 RUN bun install --frozen-lockfile
 COPY apps/web apps/web
 COPY packages packages
+# NEXT_PUBLIC_* is inlined into the client bundle at BUILD time — the runtime
+# `environment:` block in docker-compose.yml cannot change it. Pass the public
+# API URL as a build arg so the browser fetches the right host.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL=ws://localhost:8082
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 RUN cd apps/web && bun run build
 
 FROM oven/bun:1

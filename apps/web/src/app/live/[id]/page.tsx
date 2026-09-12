@@ -41,6 +41,13 @@ export default function LiveRoomPage({
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(true);
 
+  // All hooks must run unconditionally: the early returns below (joining/
+  // error/no-join) previously skipped this useCallback, flipping the hook
+  // count when `join` arrived and crashing the room (React error #310).
+  const onLeave = useCallback(() => {
+    api(`/live/${id}/leave`, { method: "POST" }).catch(() => {});
+  }, [id]);
+
   useEffect(() => {
     if (!getAccessToken()) {
       setError("Log in to join live rooms.");
@@ -75,10 +82,6 @@ export default function LiveRoomPage({
   }
 
   if (!join) return null;
-
-  const onLeave = useCallback(() => {
-    api(`/live/${id}/leave`, { method: "POST" }).catch(() => {});
-  }, [id]);
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-50">

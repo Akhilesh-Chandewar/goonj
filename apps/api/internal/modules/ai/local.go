@@ -47,9 +47,25 @@ func (h *HashEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 			}
 		}
 		normalize(vec)
+		// A token-free text (".", pure punctuation, whitespace) normalizes to
+		// the zero vector. Cosine distance against zero is NaN in pgvector, and
+		// NaN poisons downstream JSON (encoding/json refuses it — callers then
+		// write empty 200 responses). Deterministic unit vector instead.
+		if !hasNonZero(vec) {
+			vec[0] = 1
+		}
 		out = append(out, vec)
 	}
 	return out, nil
+}
+
+func hasNonZero(vec []float32) bool {
+	for _, v := range vec {
+		if v != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func tokenize(s string) []string {
